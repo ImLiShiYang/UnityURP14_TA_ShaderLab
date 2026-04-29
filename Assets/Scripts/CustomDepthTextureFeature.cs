@@ -209,6 +209,9 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
         private static readonly int CustomDepthTextureTexelSizeID =Shader.PropertyToID("_MyCustomDepthTexture_TexelSize");
             
         
+        private static readonly int CustomLightDirectionWSID =Shader.PropertyToID("_CustomLightDirectionWS");
+            
+        
         /// <summary>
         /// 保存从 Feature 传进来的配置。
         /// </summary>
@@ -584,6 +587,18 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
                         nearPlane,
                         farPlane,
                         1.0f / Mathf.Max(0.0001f, farPlane - nearPlane),
+                        0.0f
+                    )
+                );
+                
+                Vector3 lightDirWS = lightCamera.transform.forward;
+
+                cmd.SetGlobalVector(
+                    CustomLightDirectionWSID,
+                    new Vector4(
+                        lightDirWS.x,
+                        lightDirWS.y,
+                        lightDirWS.z,
                         0.0f
                     )
                 );
