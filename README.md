@@ -5,9 +5,9 @@
   PCF实现
 
   硬阴影
-  ![img.png](img.png) 
+  ![硬阴影](pictures/image1.jpg)
   
   PCF软阴影
-  ![img_1.png](img_1.png)
+  ![PCF软阴影](pictures/image2.jpg)
 
 
