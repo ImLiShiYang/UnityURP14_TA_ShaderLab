@@ -5,6 +5,8 @@ TagManager:
   serializedVersion: 2
   tags:
   - LightCamera
+  - LightCamera_Cascade0
+  - LightCamera_Cascade1
   layers:
   - Default
   - TransparentFX

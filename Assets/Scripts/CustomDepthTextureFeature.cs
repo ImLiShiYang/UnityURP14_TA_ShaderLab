@@ -28,6 +28,10 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
     [Serializable]
     public class Settings
     {
+        
+        [Header("Cascade")]
+        public int cascadeIndex = 0;
+        
         /// <summary>
         /// 自定义深度纹理的全局名字。
         ///
@@ -35,7 +39,7 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
         /// TEXTURE2D(_MyCustomDepthTexture);
         /// 来采样这张纹理。
         /// </summary>
-        public string textureName = "_MyCustomDepthTexture";
+        public string textureName = "";
         
         [Header("Texture Resolution")]
         [Tooltip("自定义深度纹理分辨率。值越大阴影越清晰，但性能和显存开销越高。")]
@@ -197,20 +201,58 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
     private class CustomDepthPass : ScriptableRenderPass
     {
         
-        private static readonly int WorldToLightUVMatrixID =Shader.PropertyToID("_WorldToLightUVMatrix");
-            
+        private static readonly int[] WorldToLightUVMatrixIDs =
+        {
+            Shader.PropertyToID("_WorldToLightUVMatrix0"),
+            Shader.PropertyToID("_WorldToLightUVMatrix1"),
+            Shader.PropertyToID("_WorldToLightUVMatrix2"),
+            Shader.PropertyToID("_WorldToLightUVMatrix3")
+        };
 
-        private static readonly int WorldToLightViewMatrixID =Shader.PropertyToID("_WorldToLightViewMatrix");
-            
+        private static readonly int[] WorldToLightViewMatrixIDs =
+        {
+            Shader.PropertyToID("_WorldToLightViewMatrix0"),
+            Shader.PropertyToID("_WorldToLightViewMatrix1"),
+            Shader.PropertyToID("_WorldToLightViewMatrix2"),
+            Shader.PropertyToID("_WorldToLightViewMatrix3")
+        };
 
-        private static readonly int CustomLightDepthParamsID =Shader.PropertyToID("_CustomLightDepthParams");
-            
+        private static readonly int[] CustomLightDepthParamsIDs =
+        {
+            Shader.PropertyToID("_CustomLightDepthParams0"),
+            Shader.PropertyToID("_CustomLightDepthParams1"),
+            Shader.PropertyToID("_CustomLightDepthParams2"),
+            Shader.PropertyToID("_CustomLightDepthParams3")
+        };
         
-        private static readonly int CustomDepthTextureTexelSizeID =Shader.PropertyToID("_MyCustomDepthTexture_TexelSize");
+        private static readonly int[] CustomDepthTextureIDs =
+        {
+            Shader.PropertyToID("_MyCustomDepthTexture0"),
+            Shader.PropertyToID("_MyCustomDepthTexture1"),
+            Shader.PropertyToID("_MyCustomDepthTexture2"),
+            Shader.PropertyToID("_MyCustomDepthTexture3")
+        };
+
+        private static readonly string[] CustomDepthTextureNames =
+        {
+            "_MyCustomDepthTexture0",
+            "_MyCustomDepthTexture1",
+            "_MyCustomDepthTexture2",
+            "_MyCustomDepthTexture3"
+        };
+        
+        private static readonly int[] CustomDepthTextureTexelSizeIDs =
+        {
+            Shader.PropertyToID("_MyCustomDepthTexture0_TexelSize"),
+            Shader.PropertyToID("_MyCustomDepthTexture1_TexelSize"),
+            Shader.PropertyToID("_MyCustomDepthTexture2_TexelSize"),
+            Shader.PropertyToID("_MyCustomDepthTexture3_TexelSize")
+        };
             
         
         private static readonly int CustomLightDirectionWSID =Shader.PropertyToID("_CustomLightDirectionWS");
             
+        private string _rtName;
         
         /// <summary>
         /// 保存从 Feature 传进来的配置。
@@ -335,7 +377,18 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
             renderPassEvent = settings.renderPassEvent;
 
             // 把纹理名转成 int ID，后面 SetGlobalTexture 使用。
-            _textureId = Shader.PropertyToID(settings.textureName);
+            int cascadeIndex = Mathf.Clamp(settings.cascadeIndex, 0, 3);
+
+            if (string.IsNullOrEmpty(settings.textureName))
+            {
+                _textureId = CustomDepthTextureIDs[cascadeIndex];
+                _rtName = CustomDepthTextureNames[cascadeIndex];
+            }
+            else
+            {
+                _textureId = Shader.PropertyToID(settings.textureName);
+                _rtName = settings.textureName;
+            }
 
             // 根据设置决定渲染队列范围。
             //
@@ -415,7 +468,7 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
             // ReAllocateIfNeeded 的好处：
             // 如果分辨率、格式没变，就复用旧 RT；
             // 如果相机尺寸变了，就自动重新分配。
-            RenderingUtils.ReAllocateIfNeeded(ref _depthColorRT,colorDesc, FilterMode.Point,TextureWrapMode.Clamp,name: _settings.textureName);
+            RenderingUtils.ReAllocateIfNeeded(ref _depthColorRT,colorDesc, FilterMode.Point,TextureWrapMode.Clamp,name: _rtName);
 
             // ================================
             // 2. 创建真正的深度缓冲
@@ -442,7 +495,7 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
             // 深度位数。
             depthDesc.depthBufferBits = 32;
 
-            RenderingUtils.ReAllocateIfNeeded(ref _depthBufferRT,depthDesc,FilterMode.Point,TextureWrapMode.Clamp,name: _settings.textureName + "_DepthBuffer" );
+            RenderingUtils.ReAllocateIfNeeded(ref _depthBufferRT,depthDesc,FilterMode.Point,TextureWrapMode.Clamp,name: _rtName + "_DepthBuffer" );
             
             // ================================
             // 3. 设置当前 Pass 的渲染目标
@@ -579,34 +632,28 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
                 float nearPlane = lightCamera.nearClipPlane;
                 float farPlane = lightCamera.farClipPlane;
 
-                cmd.SetGlobalMatrix(WorldToLightUVMatrixID, worldToLightUVMatrix);
-                cmd.SetGlobalMatrix(WorldToLightViewMatrixID, viewMatrix);
-                cmd.SetGlobalVector(
-                    CustomLightDepthParamsID,
-                    new Vector4(
-                        nearPlane,
-                        farPlane,
-                        1.0f / Mathf.Max(0.0001f, farPlane - nearPlane),
-                        0.0f
-                    )
-                );
+                int cascadeIndex = Mathf.Clamp(_settings.cascadeIndex, 0, 3);
+
+                cmd.SetGlobalMatrix(WorldToLightUVMatrixIDs[cascadeIndex], worldToLightUVMatrix);
+                cmd.SetGlobalMatrix(WorldToLightViewMatrixIDs[cascadeIndex], viewMatrix);
+                cmd.SetGlobalVector(CustomLightDepthParamsIDs[cascadeIndex], new Vector4(nearPlane, farPlane, 1.0f / Mathf.Max(0.0001f, farPlane - nearPlane), 0.0f));
+                
+                
+                
+                // cmd.SetGlobalMatrix(WorldToLightUVMatrixID, worldToLightUVMatrix);
+                // cmd.SetGlobalMatrix(WorldToLightViewMatrixID, viewMatrix);
+                // cmd.SetGlobalVector(CustomLightDepthParamsID,new Vector4(nearPlane,farPlane,1.0f / Mathf.Max(0.0001f, farPlane - nearPlane),0.0f ));
+                
                 
                 Vector3 lightDirWS = lightCamera.transform.forward;
 
-                cmd.SetGlobalVector(
-                    CustomLightDirectionWSID,
-                    new Vector4(
-                        lightDirWS.x,
-                        lightDirWS.y,
-                        lightDirWS.z,
-                        0.0f
-                    )
-                );
+                cmd.SetGlobalVector(CustomLightDirectionWSID,new Vector4(lightDirWS.x,lightDirWS.y,lightDirWS.z,0.0f ) );
+
                 
                 int resolution = Mathf.Max(16, _settings.shadowMapResolution);
 
                 cmd.SetGlobalVector(
-                    CustomDepthTextureTexelSizeID,
+                    CustomDepthTextureTexelSizeIDs[cascadeIndex],
                     new Vector4(
                         1.0f / resolution,
                         1.0f / resolution,
