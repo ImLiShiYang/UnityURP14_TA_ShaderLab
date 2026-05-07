@@ -569,11 +569,8 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
                 //
                 // 第一个 ShaderTagId 是主 Pass 名。
                 // 后面可以继续 SetShaderPassName 添加更多可匹配的 Pass。
-                DrawingSettings drawingSettings = CreateDrawingSettings(
-                    _shaderTagIds[0],
-                    ref renderingData,
-                    sortingCriteria
-                );
+                DrawingSettings drawingSettings = CreateDrawingSettings(_shaderTagIds[0],ref renderingData,sortingCriteria);
+                
 
                 // 添加额外的 Shader Pass 名。
                 //
@@ -619,11 +616,9 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
                 Matrix4x4 viewMatrix = lightCamera.worldToCameraMatrix;
 
                 // 这里 true 更适合 RenderTexture / ShadowMap 类型目标
-                Matrix4x4 projMatrix = GL.GetGPUProjectionMatrix(
-                    lightCamera.projectionMatrix,
-                    true
-                );
-
+                Matrix4x4 projMatrix = GL.GetGPUProjectionMatrix(lightCamera.projectionMatrix,true);
+                    
+                
                 Matrix4x4 textureScaleAndBias = GetTextureScaleAndBiasMatrix();
 
                 Matrix4x4 worldToLightUVMatrix =
@@ -653,14 +648,8 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
                 int resolution = Mathf.Max(16, _settings.shadowMapResolution);
 
                 cmd.SetGlobalVector(
-                    CustomDepthTextureTexelSizeIDs[cascadeIndex],
-                    new Vector4(
-                        1.0f / resolution,
-                        1.0f / resolution,
-                        resolution,
-                        resolution
-                    )
-                );
+                    CustomDepthTextureTexelSizeIDs[cascadeIndex],new Vector4(1.0f / resolution,1.0f / resolution,resolution,resolution));
+                
                 
                 // 把这张 RT 设置成全局纹理。
                 //

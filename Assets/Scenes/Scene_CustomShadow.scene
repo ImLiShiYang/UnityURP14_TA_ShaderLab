@@ -124,6 +124,38 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &60594664
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 7
+  m_Component:
+  - component: {fileID: 60594665}
+  m_Layer: 0
+  m_HasEditorInfo: 1
+  m_Name: Cascade1_center
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &60594665
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 60594664}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &90762609
 GameObject:
   m_ObjectHideFlags: 0
@@ -953,6 +985,7 @@ GameObject:
   - component: {fileID: 1561097388}
   - component: {fileID: 1561097387}
   - component: {fileID: 1561097386}
+  - component: {fileID: 1561097390}
   m_Layer: 0
   m_HasEditorInfo: 1
   m_Name: LightCamera_Cascade0
@@ -1080,12 +1113,33 @@ Transform:
   m_GameObject: {fileID: 1561097385}
   serializedVersion: 2
   m_LocalRotation: {x: 0.13995478, y: -0.19333738, z: 0.17206979, w: 0.9557329}
-  m_LocalPosition: {x: 10.53, y: 3.23, z: -7.46}
+  m_LocalPosition: {x: 15.500908, y: 5.010807, z: -13.290999}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1561097390
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1561097385}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f40993a38f3e9d04a89c811f2a67ebe5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  directionalLight: {fileID: 1775537239}
+  targetCenterTransform: {fileID: 2063332911}
+  targetCenterWS: {x: 0, y: 0, z: 0}
+  distanceFromCenter: 15
+  orthographicSize: 6
+  nearClipPlane: 0.3
+  farClipPlane: 30
+  rotationOffsetEuler: {x: 0, y: 0, z: 0}
+  updateInEditMode: 1
 --- !u!1 &1603062206
 GameObject:
   m_ObjectHideFlags: 0
@@ -1207,7 +1261,6 @@ GameObject:
   - component: {fileID: 1775537238}
   - component: {fileID: 1775537240}
   - component: {fileID: 1775537241}
-  - component: {fileID: 1775537242}
   m_Layer: 0
   m_HasEditorInfo: 1
   m_Name: Directional Light
@@ -1326,39 +1379,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1775537237}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3b2e20ca519b10242ab64f0e350213a8, type: 3}
+  m_Script: {fileID: 11500000, guid: 7f9c0267a0cf29a4abce62ce58dc11e4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  lightCamera: {fileID: 1561097388}
-  orthographicSize: 6
-  nearClipPlane: 0.3
-  farClipPlane: 30
-  followLightPosition: 0
-  followLightRotation: 1
-  lookAtShadowCenter: 0
-  shadowCenter: {x: 0, y: 0, z: 0}
-  invertLightDirection: 0
---- !u!114 &1775537242
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1775537237}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3b2e20ca519b10242ab64f0e350213a8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  lightCamera: {fileID: 2027043266}
-  orthographicSize: 18
-  nearClipPlane: 0.3
-  farClipPlane: 60
-  followLightPosition: 0
-  followLightRotation: 1
-  lookAtShadowCenter: 0
-  shadowCenter: {x: 0, y: 0, z: 0}
-  invertLightDirection: 0
+  orbitCenter: {x: 0, y: 0, z: 0}
+  orbitCenterTransform: {fileID: 0}
+  orbitAxisWS: {x: 0, y: 1, z: 0}
+  orbitSpeed: 20
+  rotateInEditMode: 0
 --- !u!1 &1869728891
 GameObject:
   m_ObjectHideFlags: 0
@@ -1589,6 +1617,7 @@ GameObject:
   - component: {fileID: 2027043266}
   - component: {fileID: 2027043265}
   - component: {fileID: 2027043264}
+  - component: {fileID: 2027043268}
   m_Layer: 0
   m_HasEditorInfo: 1
   m_Name: LightCamera_Cascade1
@@ -1686,10 +1715,10 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 60
+  far clip plane: 40
   field of view: 60
   orthographic: 1
-  orthographic size: 18
+  orthographic size: 15
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
@@ -1716,7 +1745,60 @@ Transform:
   m_GameObject: {fileID: 2027043263}
   serializedVersion: 2
   m_LocalRotation: {x: 0.13995478, y: -0.19333738, z: 0.17206979, w: 0.9557329}
-  m_LocalPosition: {x: 3.64, y: 9.2, z: -6.5}
+  m_LocalPosition: {x: 7.649173, y: 7.9504805, z: -21.088385}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2027043268
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2027043263}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f40993a38f3e9d04a89c811f2a67ebe5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  directionalLight: {fileID: 1775537239}
+  targetCenterTransform: {fileID: 60594665}
+  targetCenterWS: {x: 0, y: 0, z: 0}
+  distanceFromCenter: 23.8
+  orthographicSize: 15
+  nearClipPlane: 0.3
+  farClipPlane: 40
+  rotationOffsetEuler: {x: 0, y: 0, z: 0}
+  updateInEditMode: 1
+--- !u!1 &2063332910
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 7
+  m_Component:
+  - component: {fileID: 2063332911}
+  m_Layer: 0
+  m_HasEditorInfo: 1
+  m_Name: Cascade0_center
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2063332911
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2063332910}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 10.68, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1739,3 +1821,5 @@ SceneRoots:
   - {fileID: 254069798}
   - {fileID: 231355836}
   - {fileID: 1110390181}
+  - {fileID: 2063332911}
+  - {fileID: 60594665}
