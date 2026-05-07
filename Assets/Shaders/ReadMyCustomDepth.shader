@@ -201,6 +201,25 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 }
             }
             
+            // 根据当前像素距离 ShadowMap 边缘的距离，计算一个淡出系数。
+            // 返回 0 = 非常靠近边缘，不要阴影。
+            // 返回 1 = 离边缘足够远，正常阴影。
+            float GetShadowMapEdgeFade(int cascadeIndex, float2 uv, float radiusInTexels)
+            {
+                float2 texelSize = GetCascadeTexelSize(cascadeIndex);
+
+                // PCF/PCSS 是 5x5，循环范围是 -2 到 2。
+                // 所以实际最远采样距离大约是 2 * radius。
+                float borderWidth =
+                    max(texelSize.x, texelSize.y) * (radiusInTexels + 2.0);
+
+                float distToEdge = min(
+                    min(uv.x, 1.0 - uv.x),
+                    min(uv.y, 1.0 - uv.y)
+                );
+
+                return smoothstep(0.0, borderWidth, distToEdge);
+            }
             
             // ================= CSM 改动：根据 CascadeIndex 使用对应矩阵，把世界坐标转到对应 ShadowMap 空间 =================
             CascadeShadowData GetCascadeShadowData(float3 originalPositionWS,float3 receiverPositionWS)
@@ -234,8 +253,15 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 data.farPlane = depthParams.y;
                 data.invDepthRange = depthParams.z;
 
-                data.outside = data.lightUV.x < 0.0 || data.lightUV.x > 1.0 || data.lightUV.y < 0.0 || data.lightUV.y > 1.0 || data.viewDepth < data.nearPlane || data.viewDepth > data.farPlane;
+                float uvOutsideMargin = 0.001;
 
+                data.outside =
+                    data.lightUV.x < -uvOutsideMargin ||
+                    data.lightUV.x > 1.0 + uvOutsideMargin ||
+                    data.lightUV.y < -uvOutsideMargin ||
+                    data.lightUV.y > 1.0 + uvOutsideMargin ||
+                    data.viewDepth < data.nearPlane ||
+                    data.viewDepth > data.farPlane;
                 return data;
             }
             
@@ -483,7 +509,33 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 {
                     shadow = SampleShadowTap(shadowData.cascadeIndex, lightUV, receiverDepth, totalBias);
                 }
+                
+                // 边缘淡出
+                float edgeRadiusInTexels;
 
+                if (_UsePCSS > 0.5)
+                {
+                    // PCSS 最危险，因为 blocker search 和 filter 都会采样周围。
+                    edgeRadiusInTexels =
+                        2.0 * max(_PCSSBlockerSearchRadius, _PCSSMaxFilterRadius);
+                }
+                else if (_UsePCF > 0.5)
+                {
+                    edgeRadiusInTexels =
+                        2.0 * max(_PCFRadius, 0.01);
+                }
+                else
+                {
+                    edgeRadiusInTexels = 1.0;
+                }
+
+                float edgeFade =
+                    GetShadowMapEdgeFade(shadowData.cascadeIndex, lightUV, edgeRadiusInTexels);
+
+                // 靠近 shadow map 边界时，让阴影逐渐消失。
+                // 这样不会出现一条硬线。
+                // shadow *= edgeFade;
+                
                 float shadowFactor = lerp(1.0, 1.0 - _ShadowStrength, shadow);
                 float3 finalColor = saturate(ambient + diffuse * shadowFactor);
 
