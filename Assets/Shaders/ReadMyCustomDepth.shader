@@ -163,9 +163,15 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 {
                     return 1;
                 }
-                
-                float cameraDistance = distance(positionWS, _WorldSpaceCameraPos);
-                return cameraDistance < _CascadeSplit0 ? 0 : 1;
+
+                // 把世界坐标转换到当前渲染相机的 View Space。
+                // 在 Unity 里，相机前方通常是 view space 的 -Z。
+                float3 viewPos = TransformWorldToView(positionWS);
+
+                // 所以前方深度要取 -viewPos.z，变成正数。
+                float cameraViewDepth = -viewPos.z;
+
+                return cameraViewDepth < _CascadeSplit0 ? 0 : 1;
             }
             
             
@@ -197,11 +203,11 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
             
             
             // ================= CSM 改动：根据 CascadeIndex 使用对应矩阵，把世界坐标转到对应 ShadowMap 空间 =================
-            CascadeShadowData GetCascadeShadowData(float3 receiverPositionWS)
+            CascadeShadowData GetCascadeShadowData(float3 originalPositionWS,float3 receiverPositionWS)
             {
                 CascadeShadowData data;
 
-                data.cascadeIndex = SelectCascadeIndex(receiverPositionWS);
+                data.cascadeIndex = SelectCascadeIndex(originalPositionWS);
 
                 float4 lightUVH;
                 float3 lightViewPos;
@@ -389,15 +395,16 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 float3 unshadowedColor = saturate(ambient + diffuse);
 
                 // ================= CSM 改动：超过最大阴影距离，不采样阴影 =================
-                float cameraDistance = distance(input.positionWS, _WorldSpaceCameraPos);
+                float3 mainCameraViewPos = TransformWorldToView(input.positionWS);
+                float mainCameraViewDepth = -mainCameraViewPos.z;
 
-                if (cameraDistance > _CascadeMaxDistance)
+                if (mainCameraViewDepth > _CascadeMaxDistance)
                 {
                     return float4(unshadowedColor, _BaseColor.a);
                 }
 
                 // ================= CSM 改动：获取当前像素所属 Cascade 的阴影数据 =================
-                CascadeShadowData shadowData = GetCascadeShadowData(receiverPositionWS);
+                CascadeShadowData shadowData = GetCascadeShadowData(input.positionWS,receiverPositionWS);
 
                 // ================= CSM 改动：调试当前像素使用哪个 Cascade =================
                 if (_DebugMode > 4.5)
