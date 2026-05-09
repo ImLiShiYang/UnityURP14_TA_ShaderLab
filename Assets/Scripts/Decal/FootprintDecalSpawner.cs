@@ -1,3 +1,5 @@
+
+using System.Collections;
 using UnityEngine;
 
 /// <summary>
@@ -104,6 +106,11 @@ public class FootprintDecalSpawner : MonoBehaviour
     // 当前是否生成左脚。
     // true 表示下一次生成左脚，false 表示下一次生成右脚。
     private bool _leftFoot = true;
+    
+    
+    [Header("Lifetime")]
+    public float footprintVisibleTime = 3f;
+    public float footprintFadeTime = 2f;
 
     /// <summary>
     /// Reset 是 Unity 编辑器回调。
@@ -251,8 +258,64 @@ public class FootprintDecalSpawner : MonoBehaviour
         // 因为 local +Z 是投射方向，
         // pivot.z = footprintSize.z * 0.5f 可以让盒子从表面附近往地面内部覆盖。
         decal.pivot = new Vector3(0f, 0f, footprintSize.z * 0.5f);
-
+        
+        // Destroy(decal.gameObject, footprintLifeTime);
+        StartCoroutine(FadeAndDestroyFootprint(decal));
+        
         // 下一次切换另一只脚。
         _leftFoot = !_leftFoot;
+    }
+    
+    private IEnumerator FadeAndDestroyFootprint(ScreenSpaceDecalProjector decal)
+    {
+        // 如果传进来的 decal 已经不存在，直接结束协程
+        if (decal == null)
+            yield break;
+
+        // 生成时先让脚印完全显示
+        decal.opacity = 1f;
+
+        // 先等待一段完整显示时间
+        // 在这段时间内，脚印不会变淡
+        yield return new WaitForSeconds(footprintVisibleTime);
+
+        // 记录开始淡出时的透明度
+        // 通常是 1，但这里用 decal.opacity 更安全
+        float startOpacity = decal.opacity;
+
+        // 记录淡出已经经过的时间
+        float timer = 0f;
+
+        // 在 footprintFadeTime 时间内逐渐淡出
+        while (timer < footprintFadeTime)
+        {
+            // 如果脚印在淡出过程中被其他逻辑销毁了，直接结束协程
+            if (decal == null)
+                yield break;
+
+            // 累加当前帧经过的时间
+            timer += Time.deltaTime;
+
+            // 计算淡出进度
+            // t = 0 表示刚开始淡出
+            // t = 1 表示淡出结束
+            float t = timer / footprintFadeTime;
+
+            // 根据淡出进度，把透明度从 startOpacity 慢慢变成 0
+            decal.opacity = Mathf.Lerp(startOpacity, 0f, t);
+
+            // 等待下一帧继续执行
+            yield return null;
+        }
+
+        // 淡出结束后，再次确认 decal 还存在
+        if (decal != null)
+        {
+            // 确保最终完全透明
+            decal.opacity = 0f;
+
+            // 销毁脚印 GameObject
+            Destroy(decal.gameObject);
+        }
     }
 }
