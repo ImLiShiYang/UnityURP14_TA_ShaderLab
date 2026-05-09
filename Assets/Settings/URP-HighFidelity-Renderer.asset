@@ -76,6 +76,7 @@ MonoBehaviour:
   settings:
     decalMaterial: {fileID: 2100000, guid: 04ef70648ff9f484bb2403ce2a3cedd9, type: 2}
     renderPassEvent: 300
+    showInSceneView: 1
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
