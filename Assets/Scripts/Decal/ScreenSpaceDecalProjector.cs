@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -15,6 +16,12 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
     /// 当前激活的贴花投射器（当前版本仅支持单个 decal）。
     /// </summary>
     public static ScreenSpaceDecalProjector ActiveProjector;
+    
+    /// <summary>
+    /// 当前场景中所有启用的贴花投射器。
+    /// 多 decal 版本使用 List 保存所有 projector。
+    /// </summary>
+    public static readonly List<ScreenSpaceDecalProjector> ActiveProjectors = new List<ScreenSpaceDecalProjector>();
 
     /// <summary>
     /// 模仿 Unity Decal Projector 的缩放模式。
@@ -124,7 +131,14 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
     /// </summary>
     private void OnEnable()
     {
-        ActiveProjector = this;
+        // ActiveProjector = this;
+        
+        // 组件启用时，把自己加入全局 decal 列表。
+        // Contains 用来避免重复添加。
+        if (!ActiveProjectors.Contains(this))
+        {
+            ActiveProjectors.Add(this);
+        }
     }
 
     /// <summary>
@@ -132,10 +146,13 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
     /// </summary>
     private void OnDisable()
     {
-        if (ActiveProjector == this)
-        {
-            ActiveProjector = null;
-        }
+        // if (ActiveProjector == this)
+        // {
+        //     ActiveProjector = null;
+        // }
+        
+        // 组件禁用或销毁时，从全局 decal 列表中移除自己。
+        ActiveProjectors.Remove(this);
     }
 
     /// <summary>
@@ -152,7 +169,6 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
 
         // 把开始淡出角度限制在 0 到 180 度之间。
         // Clamp 的作用是：小于 0 时取 0，大于 180 时取 180，中间值保持不变。
-        angleFade.x = Mathf.Clamp(angleFade.x, 0f, 180f);
         angleFade.x = Mathf.Clamp(angleFade.x, 0f, 180f);
         // 结束角度必须大于开始角度，加 0.001f 避免 smoothstep 边界重合导致计算不稳定
         angleFade.y = Mathf.Clamp(angleFade.y, angleFade.x + 0.001f, 180f);

@@ -97,16 +97,31 @@ public class ScreenSpaceDecalFeature : ScriptableRendererFeature
     /// </summary>
     private bool ShouldRender(RenderingData renderingData)
     {
-        ScreenSpaceDecalProjector projector = ScreenSpaceDecalProjector.ActiveProjector;
-
-        if (projector == null)
+        // 没有任何启用的 projector，就不需要执行 decal pass。
+        if (ScreenSpaceDecalProjector.ActiveProjectors.Count == 0)
             return false;
 
-        // 优先使用 Projector 自己的材质。
-        // 如果 Projector 没有材质，就使用 Renderer Feature 的 fallback 材质。
-        Material mat = projector.decalMaterial != null ? projector.decalMaterial : settings.decalMaterial;
+        // 至少要有一个 projector 有可用材质。
+        // 优先使用 projector 自己的材质；如果没有，就使用 Renderer Feature 的 fallback 材质。
+        bool hasValidProjector = false;
 
-        if (mat == null)
+        for (int i = 0; i < ScreenSpaceDecalProjector.ActiveProjectors.Count; i++)
+        {
+            ScreenSpaceDecalProjector projector = ScreenSpaceDecalProjector.ActiveProjectors[i];
+
+            if (projector == null)
+                continue;
+
+            Material mat = projector.decalMaterial != null ? projector.decalMaterial : settings.decalMaterial;
+
+            if (mat != null)
+            {
+                hasValidProjector = true;
+                break;
+            }
+        }
+
+        if (!hasValidProjector)
             return false;
 
         CameraType cameraType = renderingData.cameraData.cameraType;
@@ -155,6 +170,11 @@ public class ScreenSpaceDecalFeature : ScriptableRendererFeature
         // 当前相机颜色目标。
         // decal 最终会混合到这个 RTHandle 指向的颜色 buffer 上。
         private RTHandle _cameraColorTarget;
+        
+        // MaterialPropertyBlock 用来给每一次 DrawMesh 单独传参数。
+        // 多 decal 时，每个 decal 的矩阵、贴图、颜色、透明度都可能不同。
+        // 如果直接 mat.SetXXX，多个 decal 共用同一个材质时容易互相覆盖。
+        private readonly MaterialPropertyBlock _propertyBlock = new MaterialPropertyBlock();
 
         /// <summary>
         /// 创建屏幕空间 decal pass。
@@ -200,101 +220,96 @@ public class ScreenSpaceDecalFeature : ScriptableRendererFeature
             if (_cameraColorTarget == null)
                 return;
 
-            ScreenSpaceDecalProjector projector = ScreenSpaceDecalProjector.ActiveProjector;
-
-            if (projector == null)
-                return;
-
-            Material mat = projector.decalMaterial != null ? projector.decalMaterial : _settings.decalMaterial;
-
-            if (mat == null)
+            if (ScreenSpaceDecalProjector.ActiveProjectors.Count == 0)
                 return;
 
             Camera camera = renderingData.cameraData.camera;
-            float distanceFade = 1f;
 
-            if (projector.drawDistance > 0f && camera != null)
-            {
-                // Vector3.Distance 返回两个世界坐标之间的距离。
-                float distance = Vector3.Distance(camera.transform.position, projector.transform.position);
-
-                if (distance > projector.drawDistance)
-                    return;
-
-                // startFade 是开始淡出的比例。
-                // 例如 drawDistance = 100，startFade = 0.9，则 90 米后开始淡出。
-                float fadeStartDistance = projector.drawDistance * projector.startFade;
-                float fadeRange = Mathf.Max(0.0001f, projector.drawDistance - fadeStartDistance);
-
-                // Clamp01 把值限制在 0 到 1。
-                // 距离越接近 drawDistance，distanceFade 越接近 0。
-                distanceFade = 1f - Mathf.Clamp01((distance - fadeStartDistance) / fadeRange);
-            }
-
-            float angleStart = Mathf.Clamp(projector.angleFade.x, 0f, 180f);
-            float angleEnd = Mathf.Clamp(projector.angleFade.y, angleStart + 0.001f, 180f);
-
-            // Shader 中用 dot(normal, direction) 判断角度。
-            // dot 的结果等于 cos(angle)，所以这里先把角度转成 cos 值。
-            float cosStart = Mathf.Cos(angleStart * Mathf.Deg2Rad);
-            float cosEnd = Mathf.Cos(angleEnd * Mathf.Deg2Rad);
-
-            Vector3 decalBackwardWS = projector.DecalBackwardWS;
-
-            // 从 CommandBufferPool 获取命令缓冲，减少临时分配。
             CommandBuffer cmd = CommandBufferPool.Get("Screen Space Decal Volume Box");
 
-            // world -> decal local 矩阵。
-            // Shader 用它把深度重建出来的 world position 转到 decal 盒子空间。
-            mat.SetMatrix(DecalWorldToLocalID, projector.GetWorldToDecalMatrix());
-
-            if (projector.decalTexture != null)
-            {
-                mat.SetTexture(DecalTextureID, projector.decalTexture);
-            }
-
-            mat.SetColor(DecalColorID, projector.decalColor);
-
-            // _DecalParams:
-            // x = opacity
-            // y = edgeFade
-            // z = cosEnd
-            // w = cosStart
-            mat.SetVector(DecalParamsID, new Vector4(projector.opacity, projector.edgeFade, cosEnd, cosStart));
-
-            // _DecalTilingOffset:
-            // xy = tiling
-            // zw = offset
-            mat.SetVector(DecalTilingOffsetID, new Vector4(projector.tiling.x, projector.tiling.y, projector.offset.x, projector.offset.y));
-
-            // decal backward world direction。
-            // Shader 用它和表面 normal 做 dot，计算 angle fade。
-            mat.SetVector(DecalBackwardWSID, new Vector4(decalBackwardWS.x, decalBackwardWS.y, decalBackwardWS.z, 0f));
-
-            // 距离淡出参数。
-            // 当前只使用 x 分量。
-            mat.SetVector(DecalDistanceFadeID, new Vector4(distanceFade, 0f, 0f, 0f));
-
-            // 设置渲染目标为当前相机颜色 buffer。
+            // 所有 decal 都画到当前相机颜色目标上。
             CoreUtils.SetRenderTarget(cmd, _cameraColorTarget);
 
-            // 关键绘制命令。
-            //
-            // 不再 DrawProcedural 画全屏三角形。
-            // 改为 DrawMesh 绘制 decal 的体积盒。
-            //
-            // 参数：
-            // _cubeMesh：单位 cube mesh。
-            // projector.GetDecalLocalToWorldMatrix()：把单位 cube 变成真实 decal 盒的矩阵。
-            // mat：decal 材质。
-            // 0：submesh index。
-            // 0：shader pass index。
-            cmd.DrawMesh(_cubeMesh, projector.GetDecalLocalToWorldMatrix(), mat, 0, 0);
+            // 遍历当前场景中所有启用的 decal projector。
+            for (int i = 0; i < ScreenSpaceDecalProjector.ActiveProjectors.Count; i++)
+            {
+                ScreenSpaceDecalProjector projector = ScreenSpaceDecalProjector.ActiveProjectors[i];
 
-            // 提交命令缓冲。
+                if (projector == null)
+                    continue;
+
+                // 优先使用 projector 自己的材质。
+                // 如果 projector 没有材质，就使用 Renderer Feature 的 fallback 材质。
+                Material mat = projector.decalMaterial != null ? projector.decalMaterial : _settings.decalMaterial;
+
+                if (mat == null)
+                    continue;
+
+                float distanceFade = 1f;
+
+                // 计算距离淡出。
+                if (projector.drawDistance > 0f && camera != null)
+                {
+                    float distance = Vector3.Distance(camera.transform.position, projector.transform.position);
+
+                    // 超出最大绘制距离，跳过这个 decal。
+                    if (distance > projector.drawDistance)
+                        continue;
+
+                    float fadeStartDistance = projector.drawDistance * projector.startFade;
+                    float fadeRange = Mathf.Max(0.0001f, projector.drawDistance - fadeStartDistance);
+
+                    distanceFade = 1f - Mathf.Clamp01((distance - fadeStartDistance) / fadeRange);
+                }
+
+                float angleStart = Mathf.Clamp(projector.angleFade.x, 0f, 180f);
+                float angleEnd = Mathf.Clamp(projector.angleFade.y, angleStart + 0.001f, 180f);
+
+                // Shader 中用 dot(normal, direction) 得到 cos(angle)，
+                // 所以这里提前把角度转换成 cos 值传给 shader。
+                float cosStart = Mathf.Cos(angleStart * Mathf.Deg2Rad);
+                float cosEnd = Mathf.Cos(angleEnd * Mathf.Deg2Rad);
+
+                Vector3 decalBackwardWS = projector.DecalBackwardWS;
+
+                // 每画一个 decal，都清空并重新设置一次 PropertyBlock。
+                _propertyBlock.Clear();
+
+                _propertyBlock.SetMatrix(DecalWorldToLocalID, projector.GetWorldToDecalMatrix());
+
+                if (projector.decalTexture != null)
+                {
+                    _propertyBlock.SetTexture(DecalTextureID, projector.decalTexture);
+                }
+
+                _propertyBlock.SetColor(DecalColorID, projector.decalColor);
+
+                // _DecalParams:
+                // x = opacity
+                // y = edgeFade
+                // z = cosEnd
+                // w = cosStart
+                _propertyBlock.SetVector(DecalParamsID, new Vector4(projector.opacity, projector.edgeFade, cosEnd, cosStart));
+
+                // _DecalTilingOffset:
+                // xy = tiling
+                // zw = offset
+                _propertyBlock.SetVector(DecalTilingOffsetID, new Vector4(projector.tiling.x, projector.tiling.y, projector.offset.x, projector.offset.y));
+
+                // decal backward world direction。
+                _propertyBlock.SetVector(DecalBackwardWSID, new Vector4(decalBackwardWS.x, decalBackwardWS.y, decalBackwardWS.z, 0f));
+
+                // 距离淡出参数。
+                _propertyBlock.SetVector(DecalDistanceFadeID, new Vector4(distanceFade, 0f, 0f, 0f));
+
+                // 绘制当前 decal 的体积盒。
+                //
+                // 注意最后一个参数 _propertyBlock：
+                // 它保证每个 decal 都有自己独立的 shader 参数。
+                cmd.DrawMesh(_cubeMesh, projector.GetDecalLocalToWorldMatrix(), mat, 0, 0, _propertyBlock);
+            }
+
             context.ExecuteCommandBuffer(cmd);
-
-            // 用完后归还给 CommandBufferPool。
             CommandBufferPool.Release(cmd);
         }
 

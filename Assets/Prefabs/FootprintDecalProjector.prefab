@@ -1,0 +1,60 @@
+%YAML 1.1
+%TAG !u! tag:yousandi.cn,2023:
+--- !u!1 &4228886168301203876
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 7
+  m_Component:
+  - component: {fileID: 5561747702875738431}
+  - component: {fileID: 4208288544586900507}
+  m_Layer: 0
+  m_HasEditorInfo: 1
+  m_Name: FootprintDecalProjector
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5561747702875738431
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4228886168301203876}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4208288544586900507
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4228886168301203876}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cff6c58cc06beb9429e16cb62747b27c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  decalMaterial: {fileID: 2100000, guid: 2026d3c755d225248ab4a6379ca68c44, type: 2}
+  decalTexture: {fileID: 2800000, guid: 3fab8656871da5947b085aa1fd679b4e, type: 3}
+  decalColor: {r: 1, g: 1, b: 1, a: 1}
+  scaleMode: 0
+  size: {x: 1, y: 1, z: 1}
+  pivot: {x: 0, y: 0, z: 0}
+  tiling: {x: 1, y: 1}
+  offset: {x: 0, y: 0}
+  opacity: 1
+  edgeFade: 0.02
+  drawDistance: 1000
+  startFade: 0.9
+  angleFade: {x: 0, y: 180}

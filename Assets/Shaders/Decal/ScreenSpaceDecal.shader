@@ -392,9 +392,9 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox"
                 //
                 // angleFade：
                 // 角度淡出。
-                // color.a *= _DecalParams.x;
-                // color.a *= _DecalDistanceFade.x;
-                // color.a *= boxFade;
+                color.a *= _DecalParams.x;
+                color.a *= _DecalDistanceFade.x;
+                color.a *= boxFade;
                 color.a *= angleFade;
 
                 return color;
