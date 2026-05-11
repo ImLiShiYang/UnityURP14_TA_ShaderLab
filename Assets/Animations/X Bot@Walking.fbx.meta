@@ -67,7 +67,7 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.7757732
+      - time: 0.8224299
         functionName: SpawnRightFootprint
         data: 
         objectReferenceParameter: {instanceID: 0}

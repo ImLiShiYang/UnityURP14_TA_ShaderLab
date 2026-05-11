@@ -738,6 +738,12 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!4 &891728933 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -2770666803903516498, guid: b9ea4daf0cb72b54ab3e794986c0ac11,
+    type: 3}
+  m_PrefabInstance: {fileID: 1317843079}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &952289447 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: b9ea4daf0cb72b54ab3e794986c0ac11,
@@ -826,6 +832,12 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 2136660880}
   m_SourcePrefab: {fileID: 100100000, guid: b9ea4daf0cb72b54ab3e794986c0ac11, type: 3}
+--- !u!4 &1440317985 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 2916570863362053800, guid: b9ea4daf0cb72b54ab3e794986c0ac11,
+    type: 3}
+  m_PrefabInstance: {fileID: 1317843079}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1461708248
 GameObject:
   m_ObjectHideFlags: 0
@@ -935,6 +947,57 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: -56.659, y: 0, z: 0}
+--- !u!1 &1734255340
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 7
+  m_Component:
+  - component: {fileID: 1734255342}
+  - component: {fileID: 1734255341}
+  m_Layer: 0
+  m_HasEditorInfo: 1
+  m_Name: FootprintPool
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1734255341
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1734255340}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3eb7ff591cb9261489d79449fbf1273f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  footprintPrefab: {fileID: 4208288544586900507, guid: d0242e11af7af394488889ebcdf0654d,
+    type: 3}
+  maxFootprints: 64
+  prewarmOnAwake: 1
+  recycleOldestWhenFull: 1
+  showDebugGUI: 1
+--- !u!4 &1734255342
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1734255340}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1858377849
 GameObject:
   m_ObjectHideFlags: 0
@@ -1147,8 +1210,8 @@ Transform:
   m_GameObject: {fileID: 2125538562}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 2.1163769, y: 0.85, z: 0.74}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: -3.28, y: 0.85, z: -4.17}
+  m_LocalScale: {x: 2.7907135, y: 1, z: 2.6970696}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1185,10 +1248,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d238d584d0e6cb48b3d6907322cf778, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  pauseOnFootprintSpawn: 0
+  pauseOnlyOnce: 0
+  usePooling: 0
+  footprintPool: {fileID: 1734255341}
   characterRoot: {fileID: 2127804085}
   animator: {fileID: 2136660879}
-  leftFoot: {fileID: 0}
-  rightFoot: {fileID: 0}
+  leftFoot: {fileID: 891728933}
+  rightFoot: {fileID: 1440317985}
   footprintPrefab: {fileID: 4208288544586900507, guid: d0242e11af7af394488889ebcdf0654d,
     type: 3}
   leftFootTexture: {fileID: 2800000, guid: 56bc49c8ff746d74095add216636934a, type: 3}
@@ -1199,9 +1266,11 @@ MonoBehaviour:
   rayStartHeight: 0.5
   rayDistance: 2
   surfaceOffset: 0.02
-  footForwardOffset: 0.15
+  walkFootForwardOffset: 0
+  runFootForwardOffset: 0
   footprintYawOffset: 0
-  footprintSize: {x: 0.15, y: 0.3, z: 0.12}
+  walkFootprintSize: {x: 0.1, y: 0.28, z: 0.12}
+  runFootprintSize: {x: 0.1, y: 0.28, z: 0.12}
   footprintVisibleTime: 3
   footprintFadeTime: 2
   minTimeBetweenSameFoot: 0.15
@@ -1216,7 +1285,7 @@ Transform:
   m_GameObject: {fileID: 2127804083}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -2.551}
+  m_LocalPosition: {x: 0, y: 0, z: -3.681}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -1306,3 +1375,4 @@ SceneRoots:
   - {fileID: 1858377853}
   - {fileID: 2127804085}
   - {fileID: 1461708252}
+  - {fileID: 1734255342}

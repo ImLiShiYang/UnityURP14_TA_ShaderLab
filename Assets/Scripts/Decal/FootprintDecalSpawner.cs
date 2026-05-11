@@ -10,6 +10,16 @@ using UnityEngine;
 /// </summary>
 public class FootprintDecalSpawner : MonoBehaviour
 {
+    [Header("Screenshot Debug")]
+    public bool pauseOnFootprintSpawn = false;
+    public bool pauseOnlyOnce = true;
+    
+    private bool _hasPausedForScreenshot;
+    
+    [Header("Pooling")]
+    public bool usePooling = true;
+    public FootprintDecalPool footprintPool;
+    
     [Header("References")]
     // 角色根节点，一般是父物体 player
     public Transform characterRoot;
@@ -25,6 +35,8 @@ public class FootprintDecalSpawner : MonoBehaviour
 
     // 脚印 Decal prefab
     public ScreenSpaceDecalProjector footprintPrefab;
+
+   
 
     [Header("Foot Textures")]
     public Texture2D leftFootTexture;
@@ -43,15 +55,20 @@ public class FootprintDecalSpawner : MonoBehaviour
     // 让脚印稍微离开地面一点点，避免深度闪烁
     public float surfaceOffset = 0.02f;
 
+    // [Header("Footprint Placement")]
+    // // 脚骨骼通常在脚踝位置，所以脚印可以稍微往脚尖方向偏移一点
+    // public float footForwardOffset = 0.08f;
     [Header("Footprint Placement")]
-    // 脚骨骼通常在脚踝位置，所以脚印可以稍微往脚尖方向偏移一点
-    public float footForwardOffset = 0.08f;
+    public float walkFootForwardOffset = 0.14f;
+    public float runFootForwardOffset = 0.06f;
 
     // 如果脚印图片方向不对，可以调这个角度
     public float footprintYawOffset = 0f;
 
     [Header("Footprint Size")]
-    public Vector3 footprintSize = new Vector3(0.25f, 0.45f, 0.12f);
+    // public Vector3 footprintSize = new Vector3(0.25f, 0.45f, 0.12f);
+    public Vector3 walkFootprintSize = new Vector3(0.25f, 0.45f, 0.12f);
+    public Vector3 runFootprintSize = new Vector3(0.25f, 0.45f, 0.12f);
 
     [Header("Lifetime")]
     public float footprintVisibleTime = 3f;
@@ -109,6 +126,41 @@ public class FootprintDecalSpawner : MonoBehaviour
                 playerController = GetComponent<ThirdPersonPlayerController>();
             }
         }
+        
+        if (usePooling && footprintPool == null)
+        {
+            #if UNITY_2023_1_OR_NEWER
+                footprintPool = FindFirstObjectByType<FootprintDecalPool>();
+            #else
+                footprintPool = FindObjectOfType<FootprintDecalPool>();
+            #endif
+        }
+        
+    }
+    
+    private Vector3 GetCurrentFootprintSize()
+    {
+        if (animator != null && animator.GetFloat("MoveSpeed") > 0.75f)
+            return runFootprintSize;
+
+        return walkFootprintSize;
+    }
+    
+    private float GetCurrentFootForwardOffset()
+    {
+        if (animator == null)
+            return walkFootForwardOffset;
+
+        float moveSpeed = animator.GetFloat("MoveSpeed");
+
+        // 你的 Blend Tree 里一般是：
+        // 0 = Idle
+        // 0.5 = Walk
+        // 1 = Run
+        if (moveSpeed > 0.75f)
+            return runFootForwardOffset;
+
+        return walkFootForwardOffset;
     }
 
     /// <summary>
@@ -231,11 +283,13 @@ public class FootprintDecalSpawner : MonoBehaviour
 
         forwardOnSurface.Normalize();
 
+        
+        float currentForwardOffset = GetCurrentFootForwardOffset();
         // 脚印位置：
         // hit.point 是地面点
         // footForwardOffset 让脚印从脚踝稍微移动到脚掌中心
         // surfaceOffset 避免贴花和地面完全重合导致闪烁
-        Vector3 spawnPosition =hit.point +forwardOnSurface * footForwardOffset + normal * surfaceOffset;
+        Vector3 spawnPosition =hit.point +forwardOnSurface * currentForwardOffset + normal * surfaceOffset;
 
         // local +Z 指向地面内部
         // local +Y 对齐脚尖方向
@@ -244,18 +298,71 @@ public class FootprintDecalSpawner : MonoBehaviour
         // 用于修正脚印贴图方向
         spawnRotation = Quaternion.AngleAxis(footprintYawOffset, normal) * spawnRotation;
 
-        ScreenSpaceDecalProjector decal = Instantiate(footprintPrefab, spawnPosition, spawnRotation);
+        // ScreenSpaceDecalProjector decal = Instantiate(footprintPrefab, spawnPosition, spawnRotation);
 
-        decal.decalTexture = footTexture;
-        decal.size = footprintSize;
+        // decal.decalTexture = footTexture;
+        // decal.size = GetCurrentFootprintSize();
+        //
+        // // 让投射盒从地面附近往地面内部投射
+        // decal.pivot = new Vector3(0f, 0f, GetCurrentFootprintSize().z * 0.5f);
+        
+        
+        Vector3 currentFootprintSize = GetCurrentFootprintSize();
+        
+        Vector3 pivot = new Vector3(0f, 0f, currentFootprintSize.z * 0.5f);
+        
+        if (usePooling && footprintPool != null)
+        {
+            footprintPool.SpawnFootprint(spawnPosition,spawnRotation,footTexture,currentFootprintSize,pivot,footprintVisibleTime,footprintFadeTime);
+        }
+        else
+        {
+            // 没有设置对象池时，保留一个 fallback，方便调试
+            ScreenSpaceDecalProjector decal = Instantiate(footprintPrefab, spawnPosition, spawnRotation);
 
-        // 让投射盒从地面附近往地面内部投射
-        decal.pivot = new Vector3(0f, 0f, footprintSize.z * 0.5f);
+            decal.decalTexture = footTexture;
+            decal.size = currentFootprintSize;
+            decal.pivot = pivot;
 
-        //协程管理，脚印随时间淡出
-        StartCoroutine(FadeAndDestroyFootprint(decal));
+            //协程管理，脚印随时间淡出  
+            StartCoroutine(FadeAndDestroyFootprint(decal));
+        }
+        
+        // StartCoroutine(FadeAndDestroyFootprint(decal));
+        
+        // 调试用：脚印生成后，在这一帧结束时自动暂停 Unity
+        StartCoroutine(PauseAtEndOfFrameForScreenshot());
     }
 
+    
+    /// <summary>
+    /// 脚印生成后自动暂停 Unity。
+    /// 
+    /// 用于截图调试：
+    /// 当脚印生成完成后，等待当前帧渲染结束，
+    /// 然后自动暂停编辑器，这样可以精准截图脚和脚印的位置。
+    /// </summary>
+    private IEnumerator PauseAtEndOfFrameForScreenshot()
+    {
+        #if UNITY_EDITOR
+            if (!pauseOnFootprintSpawn)
+                yield break;
+
+            if (pauseOnlyOnce && _hasPausedForScreenshot)
+                yield break;
+
+            _hasPausedForScreenshot = true;
+
+            // 等当前帧渲染结束，确保脚印已经显示出来
+            yield return new WaitForEndOfFrame();
+
+            // 自动暂停 Unity Editor
+            Debug.Break();
+        #else
+            yield break;
+        #endif
+    }
+    
     /// <summary>
     /// 脚印显示一段时间后逐渐淡出，并最终销毁。
     /// </summary>
