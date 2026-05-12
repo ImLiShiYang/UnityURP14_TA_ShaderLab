@@ -7,12 +7,12 @@
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
 
-# Visual Studio / Rider / VS Code
+# IDE
 .vs/
 .idea/
 .vscode/
 
-# Visual Studio generated files
+# Visual Studio / Rider generated files
 *.csproj
 *.sln
 *.suo
@@ -26,11 +26,10 @@
 *.mdb
 *.opendb
 *.VC.db
-
-# Rider
 *.sln.DotSettings.user
+.vsconfig
 
-# OS generated files
+# OS files
 .DS_Store
 Thumbs.db
 
@@ -44,4 +43,18 @@ sysinfo.txt
 *.aab
 *.unitypackage
 
-.vsconfig
+# Ignore everything under Assets
+Assets/*
+
+# Keep only my own TA work
+!Assets/MyTA/
+!Assets/MyTA/**
+!Assets/MyTA.meta
+
+# Explicitly ignore imported packages
+Assets/PureNature/
+Assets/PureNature.meta
+Assets/SimpleNaturePack/
+Assets/SimpleNaturePack.meta
+Assets/TutorialInfo/
+Assets/TutorialInfo.meta
