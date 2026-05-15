@@ -154,7 +154,8 @@ public class FootprintDecalPool : MonoBehaviour
     /// 注意：
     /// 这里不是 Instantiate，而是从池里拿一个对象出来复用。
     /// </summary>
-    public ScreenSpaceDecalProjector SpawnFootprint(Vector3 position, Quaternion rotation,Texture2D texture,Vector3 size,Vector3 pivot,float visibleTime,float fadeTime)
+    public ScreenSpaceDecalProjector SpawnFootprint(Vector3 position, Quaternion rotation,Texture2D texture,Texture2D normalTexture,float normalStrength,
+        Vector3 size,Vector3 pivot,float opacity,float edgeFade,float visibleTime,float fadeTime)
     {
         if (footprintPrefab == null)
         {
@@ -182,16 +183,20 @@ public class FootprintDecalPool : MonoBehaviour
 
         // 设置本次脚印的数据
         projector.decalTexture = texture;
+        projector.decalNormalTexture = normalTexture;
+        projector.normalStrength = normalStrength;
+        
         projector.size = size;
         projector.pivot = pivot;
-        projector.opacity = 1f;
+        projector.opacity = opacity;
+        projector.edgeFade = edgeFade;
 
         // 记录为正在使用
         pooled.IsActiveInPool = true;
         _active.AddLast(pooled);
 
         // 开始生命周期：完整显示 → 淡出 → 回收到池
-        pooled.PlayLifetime(visibleTime, fadeTime);
+        pooled.PlayLifetime(visibleTime, fadeTime, opacity);
 
         return projector;
     }
@@ -331,11 +336,11 @@ public class PooledFootprintDecal : MonoBehaviour
     /// <summary>
     /// 开始脚印生命周期。
     /// </summary>
-    public void PlayLifetime(float visibleTime, float fadeTime)
+    public void PlayLifetime(float visibleTime, float fadeTime, float startOpacity)
     {
         StopLifetime();
 
-        _lifetimeCoroutine = StartCoroutine(LifetimeCoroutine(visibleTime, fadeTime));
+        _lifetimeCoroutine = StartCoroutine(LifetimeCoroutine(visibleTime, fadeTime, startOpacity));
     }
 
     /// <summary>
@@ -355,12 +360,12 @@ public class PooledFootprintDecal : MonoBehaviour
     /// 脚印生命周期：
     /// 先完整显示，再逐渐淡出，最后回收到对象池。
     /// </summary>
-    private IEnumerator LifetimeCoroutine(float visibleTime, float fadeTime)
+    private IEnumerator LifetimeCoroutine(float visibleTime, float fadeTime, float Opacity)
     {
         if (Projector == null)
             yield break;
 
-        Projector.opacity = 1f;
+        Projector.opacity = Opacity;
 
         if (visibleTime > 0f)
         {

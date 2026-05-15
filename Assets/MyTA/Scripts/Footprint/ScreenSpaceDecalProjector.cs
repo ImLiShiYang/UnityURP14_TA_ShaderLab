@@ -51,6 +51,19 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
     /// </summary>
     [Header("Decal Texture")]
     public Texture2D decalTexture;
+    
+    [Header("Decal Normal")]
+    [Tooltip("贴花法线贴图。用于给脚印制造假的凹陷 / 凸起光照效果。")]
+    public Texture2D decalNormalTexture;
+
+    [Tooltip(
+        "法线效果强度。\n" +
+        "0 = 不使用法线效果。\n" +
+        "1 = 法线效果最强。\n\n" +
+        "脚印建议 0.2 ~ 0.5，太大会像塑料凸起。"
+    )]
+    [Range(0f, 1f)]
+    public float normalStrength = 0.35f;
 
     /// <summary>
     /// 贴花颜色，默认为白色（不额外改变贴图颜色）。
@@ -253,6 +266,8 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
     /// <summary>
     /// 在 Scene View 中绘制贴花投射盒线框和投射方向线。
     /// </summary>
+    
+    /*
     private void OnDrawGizmos()
     {
         // 绘制贴花盒线框
@@ -278,4 +293,5 @@ public class ScreenSpaceDecalProjector : MonoBehaviour
         // Vector3.forward 即 local +Z，表示投射方向
         Gizmos.DrawLine(pivot, pivot + Vector3.forward * Mathf.Max(0.25f, size.z * 0.5f));
     }
+    */
 }

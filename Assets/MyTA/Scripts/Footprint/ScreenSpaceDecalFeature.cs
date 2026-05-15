@@ -159,6 +159,13 @@ public class ScreenSpaceDecalFeature : ScriptableRendererFeature
         private static readonly int DecalTilingOffsetID = Shader.PropertyToID("_DecalTilingOffset");
         private static readonly int DecalBackwardWSID = Shader.PropertyToID("_DecalBackwardWS");
         private static readonly int DecalDistanceFadeID = Shader.PropertyToID("_DecalDistanceFade");
+        
+        private static readonly int DecalNormalTextureID = Shader.PropertyToID("_DecalNormalTexture");
+        private static readonly int DecalNormalParamsID = Shader.PropertyToID("_DecalNormalParams");
+
+        private static readonly int DecalTangentWSID = Shader.PropertyToID("_DecalTangentWS");
+        private static readonly int DecalBitangentWSID = Shader.PropertyToID("_DecalBitangentWS");
+        private static readonly int DecalNormalWSID = Shader.PropertyToID("_DecalNormalWS");
 
         // Renderer Feature 中的设置引用。
         private readonly Settings _settings;
@@ -282,6 +289,43 @@ public class ScreenSpaceDecalFeature : ScriptableRendererFeature
                     _propertyBlock.SetTexture(DecalTextureID, projector.decalTexture);
                 }
 
+                if (projector.decalNormalTexture != null)
+                {
+                    _propertyBlock.SetTexture(DecalNormalTextureID, projector.decalNormalTexture);
+                }
+
+                _propertyBlock.SetVector(
+                    DecalNormalParamsID,
+                    new Vector4(projector.normalStrength, 0f, 0f, 0f)
+                );
+                
+                Transform projectorTransform = projector.transform;
+
+                // local X：贴图横向
+                Vector3 tangentWS = projectorTransform.right.normalized;
+
+                // local Y：贴图纵向，也就是脚尖方向
+                Vector3 bitangentWS = projectorTransform.up.normalized;
+
+                // 你的 projector local +Z 指向地面内部，
+                // 所以 -forward 才是接收面的法线方向
+                Vector3 decalNormalWS = -projectorTransform.forward.normalized;
+
+                _propertyBlock.SetVector(
+                    DecalTangentWSID,
+                    new Vector4(tangentWS.x, tangentWS.y, tangentWS.z, 0f)
+                );
+
+                _propertyBlock.SetVector(
+                    DecalBitangentWSID,
+                    new Vector4(bitangentWS.x, bitangentWS.y, bitangentWS.z, 0f)
+                );
+
+                _propertyBlock.SetVector(
+                    DecalNormalWSID,
+                    new Vector4(decalNormalWS.x, decalNormalWS.y, decalNormalWS.z, 0f)
+                );
+                
                 _propertyBlock.SetColor(DecalColorID, projector.decalColor);
 
                 // _DecalParams:

@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:yousandi.cn,2023:
---- !u!114 &-5441505155230543007
+--- !u!114 &-4698205249757726297
 MonoBehaviour:
   m_ObjectHideFlags: 11
   m_CorrespondingSourceObject: {fileID: 0}
@@ -20,8 +20,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: FootprintDecalMat
-  m_Shader: {fileID: 4800000, guid: 0f39d21349f87ad48a3728202920901a, type: 3}
+  m_Name: FootprintDecal_POM_Mat
+  m_Shader: {fileID: 4800000, guid: a94797399f31fd04386281a902ba98de, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -44,8 +44,16 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _DecalHeightTexture:
+        m_Texture: {fileID: 2800000, guid: cc402ff1826695845830a597cf47c142, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DecalNormalTexture:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _DecalTexture:
-        m_Texture: {fileID: 2800000, guid: 3fab8656871da5947b085aa1fd679b4e, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _DetailAlbedoMap:
@@ -99,7 +107,9 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _AlphaFromPOM: 0.5
     - _AlphaToMask: 0
+    - _AmbientStrength: 0.25
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
     - _BumpScale: 1
@@ -107,17 +117,26 @@ Material:
     - _ClearCoatSmoothness: 0
     - _Cull: 2
     - _Cutoff: 0.5
+    - _DebugView: 0
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
+    - _DiffuseStrength: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
+    - _HeightContrast: 3
+    - _HeightGround: 0.5
+    - _InvertHeight: 0
     - _Metallic: 0
+    - _NormalStrength: 1
     - _OcclusionStrength: 1
+    - _POMMaxSteps: 64
+    - _POMMinSteps: 20
     - _Parallax: 0.005
+    - _ParallaxStrength: 0.05
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _Smoothness: 0.5
@@ -126,6 +145,7 @@ Material:
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
+    - _UseBaseRGB: 1
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:

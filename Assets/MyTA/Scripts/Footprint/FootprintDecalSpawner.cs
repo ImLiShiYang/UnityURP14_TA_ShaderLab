@@ -27,6 +27,13 @@ public class FootprintDecalSpawner : MonoBehaviour
 
     [Tooltip("玩家移动控制器。用于判断当前是否真的有移动输入。")]
     public ThirdPersonPlayerController playerController;
+    
+    [Header("Surface Mask")]
+    [Tooltip("是否只允许在指定表面区域生成脚印")]
+    public bool useSurfaceMask = true;
+
+    [Tooltip("湿地区域判断组件")]
+    public FootprintWetlandMask wetlandMask;
 
 
     // ============================================================
@@ -64,6 +71,45 @@ public class FootprintDecalSpawner : MonoBehaviour
 
     [Tooltip("右脚脚印贴图。")]
     public Texture2D rightFootTexture;
+    
+    [Tooltip("左脚脚印法线贴图，用来制造泥地凹陷 / 凸起边缘效果。")]
+    public Texture2D leftFootNormalTexture;
+
+    [Tooltip("右脚脚印法线贴图，用来制造泥地凹陷 / 凸起边缘效果。")]
+    public Texture2D rightFootNormalTexture;
+    
+
+    [Header("Footprint Visual")]
+    [Tooltip(
+        "脚印整体透明度。\n" +
+        "0 = 完全透明，看不见脚印。\n" +
+        "1 = 完全不透明，脚印最明显。\n\n" +
+        "湿地脚印建议使用 0.35 ~ 0.6。\n" +
+        "如果脚印太像贴纸，就降低这个值。"
+    )]
+    [Range(0f, 1f)]
+    public float footprintOpacity = 0.5f;
+
+    [Tooltip(
+        "脚印投射盒边缘淡出范围。\n" +
+        "值越大，Decal 盒子边缘越柔和。\n" +
+        "值越小，Decal 边缘越硬。\n\n" +
+        "注意：这个参数主要控制投射盒边缘的淡出，\n" +
+        "不能完全替代脚印贴图本身的 Alpha 羽化。\n\n" +
+        "湿地脚印建议使用 0.08 ~ 0.15。\n" +
+        "如果脚印边缘太硬，就增大这个值。"
+    )]
+    [Range(0f, 0.5f)]
+    public float footprintEdgeFade = 0.08f;
+    
+    [Tooltip(
+        "脚印法线效果强度。\n" +
+        "0 = 没有凹凸感。\n" +
+        "1 = 凹凸感最强。\n\n" +
+        "湿地脚印建议 0.25 ~ 0.45。"
+    )]
+    [Range(0f, 1f)]
+    public float footprintNormalStrength = 0.35f;
 
 
     // ============================================================
@@ -123,6 +169,8 @@ public class FootprintDecalSpawner : MonoBehaviour
 
     [Tooltip("跑步脚印尺寸。x = 宽度，y = 长度，z = 投射深度。")]
     public Vector3 runFootprintSize = new Vector3(0.20f, 0.36f, 0.10f);
+    
+    
 
 
     // ============================================================
@@ -345,6 +393,11 @@ public class FootprintDecalSpawner : MonoBehaviour
             #endif
         }
         
+        if (wetlandMask == null)
+        {
+            wetlandMask = FindObjectOfType<FootprintWetlandMask>();
+        }
+        
     }
     
     private Vector3 GetCurrentFootprintSize()
@@ -479,7 +532,9 @@ public class FootprintDecalSpawner : MonoBehaviour
         Vector3 footCenterPosition = footBonePosition;
         Vector3 toeBonePosition = Vector3.zero;
         bool hasToe = toeTransform != null;
-        Debug.Log($"Foot = {footTransform.name}, Toe = {(toeTransform != null ? toeTransform.name : "NULL")}, toeBlend = {toeBlend}");
+        
+        // Debug.Log($"Foot = {footTransform.name}, Toe = {(toeTransform != null ? toeTransform.name : "NULL")}, toeBlend = {toeBlend}");
+        
         if (hasToe)
         {
             toeBonePosition = toeTransform.position;
@@ -523,6 +578,12 @@ public class FootprintDecalSpawner : MonoBehaviour
         //     return;
 
         Vector3 normal = hit.normal;
+        
+        if (useSurfaceMask && wetlandMask != null)
+        {
+            if (!wetlandMask.CanSpawnAt(hit.point))
+                return;
+        }
 
         // 用角色朝向作为脚印朝向
         // 这样脚印会和角色移动方向保持一致
@@ -584,9 +645,15 @@ public class FootprintDecalSpawner : MonoBehaviour
             pivot
         );
         
+        Texture2D footNormalTexture =footSide == DebugFootSide.Left ? leftFootNormalTexture: rightFootNormalTexture;
+            
+               
+                
+        
         if (usePooling && footprintPool != null)
         {
-            footprintPool.SpawnFootprint(spawnPosition,spawnRotation,footTexture,currentFootprintSize,pivot,footprintVisibleTime,footprintFadeTime);
+            footprintPool.SpawnFootprint(spawnPosition,spawnRotation,footTexture,footNormalTexture,footprintNormalStrength,currentFootprintSize,pivot,footprintOpacity,
+                footprintEdgeFade,footprintVisibleTime,footprintFadeTime);
         }
         else
         {
@@ -596,9 +663,13 @@ public class FootprintDecalSpawner : MonoBehaviour
             decal.decalTexture = footTexture;
             decal.size = currentFootprintSize;
             decal.pivot = pivot;
+            decal.opacity = footprintOpacity;
+            decal.edgeFade = footprintEdgeFade;
+            decal.decalNormalTexture = footNormalTexture;
+            decal.normalStrength = footprintNormalStrength;
 
             //协程管理，脚印随时间淡出  
-            StartCoroutine(FadeAndDestroyFootprint(decal));
+            StartCoroutine(FadeAndDestroyFootprint(decal,footprintOpacity));
         }
         
         
@@ -638,12 +709,12 @@ public class FootprintDecalSpawner : MonoBehaviour
     /// <summary>
     /// 脚印显示一段时间后逐渐淡出，并最终销毁。
     /// </summary>
-    private IEnumerator FadeAndDestroyFootprint(ScreenSpaceDecalProjector decal)
+    private IEnumerator FadeAndDestroyFootprint(ScreenSpaceDecalProjector decal, float opacity)
     {
         if (decal == null)
             yield break;
 
-        decal.opacity = 1f;
+        decal.opacity = opacity;
 
         yield return new WaitForSeconds(footprintVisibleTime);
 
