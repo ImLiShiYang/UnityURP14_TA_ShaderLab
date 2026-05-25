@@ -19,6 +19,10 @@ public class FootprintReliefTextureGenerator : EditorWindow
         public const bool GenerateHeightTexture = true;
         public const bool GenerateNormalTexture = true;
 
+        // 是否给生成的 Decal / Height / Normal 加内部噪声。
+        // true = 保持原脚本效果；false = 坑底更干净，Normal 内部不会有细碎噪声。
+        public const bool AddGeneratedNoise = true;
+
         // 只控制“垂直下压”的深度。
         public const float DepressionDepth = 2.4f;
 
@@ -46,6 +50,10 @@ public class FootprintReliefTextureGenerator : EditorWindow
     [Header("Vertical Depression")]
     [SerializeField] private bool generateHeightTexture = DefaultParams.GenerateHeightTexture;
     [SerializeField] private bool generateNormalTexture = DefaultParams.GenerateNormalTexture;
+
+    [Header("Generated Noise")]
+    [Tooltip("是否给生成的 Decal / Height / Normal 添加内部噪声。关闭后坑底更干净，Normal 内部不会有细碎噪声。")]
+    [SerializeField] private bool addGeneratedNoise = DefaultParams.AddGeneratedNoise;
 
     [Tooltip("脚印内部统一下压深度。值越大，Height 越黑，Normal 边缘越强。")]
     [SerializeField] private float depressionDepth = DefaultParams.DepressionDepth;
@@ -167,6 +175,9 @@ public class FootprintReliefTextureGenerator : EditorWindow
         generateNormalTexture = EditorGUILayout.Toggle("Generate Normal Texture", generateNormalTexture);
         depressionDepth = EditorGUILayout.Slider("Depression Depth", depressionDepth, 0f, 4f);
 
+        DrawSectionTitle("Generated Noise");
+        addGeneratedNoise = EditorGUILayout.Toggle("Add Noise To Generated Textures", addGeneratedNoise);
+
         DrawSectionTitle("Normal Map");
         generatedNormalStrength = EditorGUILayout.Slider("Generated Normal Strength", generatedNormalStrength, 1f, 50f);
         reliefBlurIterations = EditorGUILayout.IntSlider("Relief Blur Iterations", reliefBlurIterations, 0, 3);
@@ -226,6 +237,7 @@ public class FootprintReliefTextureGenerator : EditorWindow
 
         generateHeightTexture = DefaultParams.GenerateHeightTexture;
         generateNormalTexture = DefaultParams.GenerateNormalTexture;
+        addGeneratedNoise = DefaultParams.AddGeneratedNoise;
         depressionDepth = DefaultParams.DepressionDepth;
 
         reliefBlurIterations = DefaultParams.ReliefBlurIterations;
@@ -333,7 +345,8 @@ public class FootprintReliefTextureGenerator : EditorWindow
 
         if (generateHeightTexture)
         {
-            Texture2D heightTexture = CreateHeightTexture(relief, width, height);
+            Texture2D heightTexture = CreateHeightTexture(maskData, relief, width, height);
+            
             string heightPath = $"{outputFolder}/{sourceName}_GeneratedHeight.png";
             SavePngTexture(heightTexture, heightPath);
             ConfigureLinearDefaultImport(heightPath);
@@ -471,7 +484,8 @@ public class FootprintReliefTextureGenerator : EditorWindow
         float depth = Mathf.Max(0f, depressionDepth);
 
         // 坑底噪声强度。不要太大，否则泥坑会变脏。
-        float heightNoiseStrength = depth * 0.055f;
+        // 由 UI 的 Add Noise To Generated Textures 统一控制。
+        float heightNoiseStrength = addGeneratedNoise ? depth * 0.055f : 0f;
 
         // 噪声尺寸。越大，噪声越粗；越小，噪声越碎。
         float largeNoiseScale = 32f;
@@ -491,10 +505,15 @@ public class FootprintReliefTextureGenerator : EditorWindow
                     float innerFade = Mathf.Clamp01(edgeDistance / 8f);
                     innerFade = Smooth01(innerFade);
 
-                    float n1 = SignedNoise(x / largeNoiseScale, y / largeNoiseScale, 11);
-                    float n2 = SignedNoise(x / smallNoiseScale, y / smallNoiseScale, 37);
+                    float noise = 0f;
 
-                    float noise = (n1 * 0.7f + n2 * 0.3f) * heightNoiseStrength * innerFade;
+                    if (addGeneratedNoise && heightNoiseStrength > 0f)
+                    {
+                        float n1 = SignedNoise(x / largeNoiseScale, y / largeNoiseScale, 11);
+                        float n2 = SignedNoise(x / smallNoiseScale, y / smallNoiseScale, 37);
+
+                        noise = (n1 * 0.7f + n2 * 0.3f) * heightNoiseStrength * innerFade;
+                    }
 
                     // 基础是整体下压，噪声只是在坑底做轻微起伏。
                     relief[i] = -depth + noise;
@@ -538,7 +557,8 @@ public class FootprintReliefTextureGenerator : EditorWindow
     float visualWallWidth = 10f;
 
     // 泥土噪声强度：只影响 RGB，不影响 Alpha。
-    float noiseStrength = 0.16f;
+    // 由 UI 的 Add Noise To Generated Textures 统一控制。
+    float noiseStrength = addGeneratedNoise ? 0.16f : 0f;
 
     // 假光方向：决定哪一侧稍亮、哪一侧稍暗。
     Vector2 fakeLightDir = new Vector2(-0.55f, 0.85f).normalized;
@@ -602,9 +622,14 @@ public class FootprintReliefTextureGenerator : EditorWindow
             float pitDark = 0.12f;
 
             // 泥土噪声：大块 + 小块混合。
-            float n1 = SignedNoise(x / 30f, y / 30f, 101);
-            float n2 = SignedNoise(x / 9f, y / 9f, 203);
-            float noise = (n1 * 0.65f + n2 * 0.35f) * noiseStrength * inner01;
+            float noise = 0f;
+
+            if (addGeneratedNoise && noiseStrength > 0f)
+            {
+                float n1 = SignedNoise(x / 30f, y / 30f, 101);
+                float n2 = SignedNoise(x / 9f, y / 9f, 203);
+                noise = (n1 * 0.65f + n2 * 0.35f) * noiseStrength * inner01;
+            }
 
             // 最终明暗系数。
             float shade = 1f;
@@ -630,21 +655,31 @@ public class FootprintReliefTextureGenerator : EditorWindow
     return texture;
 }
 
-    private Texture2D CreateHeightTexture(float[] relief, int width, int height)
+    private Texture2D CreateHeightTexture(MaskData maskData, float[] relief, int width, int height)
     {
         Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
         Color[] colors = new Color[width * height];
 
-        // shader 里 HeightGround = 0.5，所以正常地面写 0.5。
-        float ground = 0.5f;
+        float safeDepth = Mathf.Max(0.0001f, depressionDepth);
 
-        // 这个越大，脚印内部越黑。只影响 Height 贴图灰度，不改变 relief 本身。
-        float depressionScale = 0.16f;
-
-        for (int i = 0; i < relief.Length; i++)
+        for (int i = 0; i < colors.Length; i++)
         {
-            float h = ground + relief[i] * depressionScale;
-            h = Mathf.Clamp01(h);
+            // 外部 = 白色，代表最高 / 原地面
+            // 内部 = 黑色，代表最大下陷
+            // 开启噪声时，Height 坑底也会带非常轻微的灰度起伏；关闭时保持纯黑坑底。
+            float h;
+
+            if (maskData.mask[i])
+            {
+                h = addGeneratedNoise
+                    ? Mathf.Clamp01(1f + relief[i] / safeDepth)
+                    : 0f;
+            }
+            else
+            {
+                h = 1f;
+            }
+
             colors[i] = new Color(h, h, h, 1f);
         }
 
