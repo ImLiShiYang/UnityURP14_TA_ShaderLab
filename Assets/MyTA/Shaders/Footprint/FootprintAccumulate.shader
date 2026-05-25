@@ -147,6 +147,7 @@ Shader "Hidden/Footprints/FootprintAccumulate"
                 if (curHeight > lastHeight)
                 {
                     mixedNormal = curNormal;
+                    // mixedNormal=WhiteoutBlend(curHeight,lastHeight);
                 }
 
 

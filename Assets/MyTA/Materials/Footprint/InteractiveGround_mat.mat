@@ -99,7 +99,7 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EnableFootstep: 1
+    - _EnableFootstep: 0
     - _EnvironmentReflections: 1
     - _FlipFootprintNormalY: 0
     - _FootprintDepth: 0.04
@@ -130,7 +130,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FootprintColor: {r: 1, g: 1, b: 1, a: 1}
-    - _FootstepRect: {r: -4.3479843, g: 15.078449, b: 3.6520154, a: 23.07845}
+    - _FootstepRect: {r: -13.184811, g: 29.387295, b: -5.1848106, a: 37.387295}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &1596812280583404679
