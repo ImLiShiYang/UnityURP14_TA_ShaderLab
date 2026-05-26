@@ -136,7 +136,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FootprintColor: {r: 1, g: 1, b: 1, a: 1}
-    - _FootstepRect: {r: 3.802969, g: 24.808533, b: 11.802969, a: 32.808533}
+    - _FootstepRect: {r: -2.306406, g: 19.441345, b: 5.693594, a: 27.441345}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &1596812280583404679
