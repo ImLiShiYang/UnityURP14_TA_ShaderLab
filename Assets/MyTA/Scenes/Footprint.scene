@@ -849,7 +849,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 1310217047}
   targetOffset: {x: 0, y: 0.5, z: 0}
-  distance: 2.5
+  distance: 2
   mouseSensitivity: 2
   smoothTime: 0.05
   useInitialView: 1
@@ -1948,7 +1948,7 @@ MonoBehaviour:
   stepDistance: 0.7
   footSideOffset: 0.18
   groundOffset: 0.05
-  brushLife: 0.02
+  brushLife: 0.2
 --- !u!1 &1469953371
 GameObject:
   m_ObjectHideFlags: 0

@@ -147,7 +147,7 @@ public class FootprintRTManager : MonoBehaviour
     /// </summary>
     public Color ClearColor => NormalClearColor;
 
-    private static readonly Color NormalClearColor = new Color(0.5f, 0.5f, 1f, 0f);
+    private static readonly Color NormalClearColor = new Color(0.5f, 0.5f, 1f, 0.5f);
 
     /// <summary>
     /// 累积 shader 参数 ID。

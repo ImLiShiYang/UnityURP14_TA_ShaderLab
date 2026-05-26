@@ -102,8 +102,14 @@ Material:
     - _EnableFootstep: 0
     - _EnvironmentReflections: 1
     - _FlipFootprintNormalY: 0
+    - _FootprintAOSmoothMax: 0.45
+    - _FootprintAOSmoothMin: 0.02
+    - _FootprintAOStrength: 0.35
     - _FootprintDepth: 0.04
     - _FootprintNormalStrength: 1
+    - _FootprintRimLightStrength: 0.08
+    - _FootprintSignedDeadZone: 0.005
+    - _FootprintSpecOcclusion: 0.4
     - _FootprintStrength: 1
     - _GlossMapScale: 0
     - _Glossiness: 0
@@ -130,7 +136,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FootprintColor: {r: 1, g: 1, b: 1, a: 1}
-    - _FootstepRect: {r: -13.184811, g: 29.387295, b: -5.1848106, a: 37.387295}
+    - _FootstepRect: {r: 3.802969, g: 24.808533, b: 11.802969, a: 32.808533}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &1596812280583404679

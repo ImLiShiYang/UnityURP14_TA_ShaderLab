@@ -1,187 +1,21 @@
 /*
- * ============================================================
- *  FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Commented
- * ============================================================
- *  这是“左脚平滑泥边版脚印生成器”的带详细注释版本。
+ * FootprintReliefTextureGenerator - Bowl Depression / Signed Height Version
  *
- *  这个工具做的事情：
- *  1. 读取一张脚印 Mask / Alpha 贴图。
- *  2. 根据脚印轮廓生成一张“浮雕高度场（relief）”：
- *     - 脚印内部是凹陷
- *     - 脚印外圈是一圈平滑隆起的泥边
- *     - 左脚默认：内侧（两脚并拢的一边）更直，外侧更斜
- *     - 可选：坑底是否平整（Flat Interior）
- *     - 可选：脚跟是否比前掌更深
- *  3. 再由这张 relief 同时生成：
- *     - Decal 贴图（颜色/透明度）
- *     - Height 贴图（支持 signed height）
- *     - Normal 贴图
+ * 这版用于路线 B：Signed Height。
  *
- *  ------------------------------------------------------------
- *  参数分组说明（和 Inspector 面板一一对应）
- *  ------------------------------------------------------------
+ * HeightTex 语义：
+ *     0.5 = 原始地面 / 背景
+ *   < 0.5 = 脚印下陷
+ *   > 0.5 = 泥边隆起
  *
- *  [Input]
- *  - Alpha Threshold
- *      用来判断“哪些像素算脚印内部”。
- *      如果源贴图是黑白/灰度轮廓，值越大，脚印会越小。
+ * 新增：Interior Bowl Depression
+ * - 内部不再只是平底坑。
+ * - 通过 distanceToOutside / maxInsideDistance 生成“碗形凹陷”。
+ * - 前掌和脚跟可以更深，脚心区域可以稍浅。
  *
- *  - Prefer Alpha Channel
- *      勾上后，优先读取源图的 Alpha 通道作为脚印轮廓。
- *      如果源图没有可用 Alpha，就退回用 RGB 灰度判断。
- *
- *  [Generated Decal Texture]
- *  - Generate Decal Texture
- *      是否输出一张 Decal 颜色贴图。
- *
- *  - Decal RGB
- *      脚印颜色基色，通常是泥土色、湿泥色。
- *
- *  - Inner Alpha
- *      脚印内部的最大透明度。
- *      越高，Decal 越明显；越低，越像“只靠法线/高度表现”。
- *
- *  - Soft Edge Pixels
- *      Decal 从边缘过渡到内部的柔和宽度。
- *      值越大，Decal 边缘越柔。
- *
- *  [Vertical Depression]
- *  - Generate Height Texture
- *      是否输出 Height 贴图。
- *
- *  - Generate Normal Texture
- *      是否输出 Normal 贴图。
- *
- *  - Depression Depth
- *      整体脚印凹陷的基础深度。
- *      它会影响 Height 以及最终 Normal 的起伏强度。
- *
- *  [Generated Noise]
- *  - Add Very Subtle Interior Noise
- *      是否给鞋印内部加入轻微泥面噪声。
- *      只影响内部，不再生成外圈泥块。
- *
- *  [Interior Shape]
- *  - Flat Interior
- *      开启后：脚印内部尽量做成平底。
- *      关闭后：内部保留更自然的连续凹陷变化。
- *
- *  - Keep Heel Deeper When Flat
- *      只有 Flat Interior 开启时才有意义。
- *      开启后：即使坑底整体较平，也会保留“脚跟略深于前掌”的趋势。
- *      关闭后：坑底真正接近统一深度。
- *
- *  - Flat Interior Depth Scale
- *      Flat Interior 开启且“不保留脚跟更深”时，
- *      用它控制这个“统一平底”的深度系数。
- *
- *  [Asymmetric Foot Shape]
- *  - Outer Wall Width
- *      脚外侧坑壁的过渡宽度。
- *      值越大，坑壁越斜、越缓。
- *
- *  - Inner Wall Width
- *      脚内侧坑壁的过渡宽度。
- *      值越小，内侧越接近垂直。
- *
- *  - Inner Side On Right
- *      是否认为“内侧在右边”。
- *      左脚通常为 true，右脚通常为 false。
- *
- *  - Toe At Top
- *      脚尖是否朝贴图上方。
- *      影响“脚跟更深 / 前掌更浅”的方向判断。
- *
- *  [Smooth Mud Lip]
- *  - Outer Lip Width
- *      外圈泥边的宽度。
- *
- *  - Outer Lip Height
- *      外圈泥边的抬起高度。
- *
- *  - Outer Lip Roundness
- *      泥边轮廓的圆滑程度：越大越宽圆，越小越紧。
- *
- *  [Front / Heel Pressure]
- *  - Front Depth Scale
- *      前掌的深度权重。
- *
- *  - Heel Depth Scale
- *      脚跟的深度权重。
- *
- *  - Whole Sole Influence
- *      整个鞋底保留多少整体下压感。
- *      值越大，整个内部都会更明显地一起下压；
- *      值越小，更多由前掌/脚跟局部决定。
- *
- *  [Normal Map]
- *  - Generated Normal Strength
- *      从 relief 推导 Normal 时的强度倍率。
- *      值越高，法线越“硬”、凹凸越明显。
- *
- *  - Relief Blur Iterations
- *      生成完 relief 后，做多少次模糊。
- *      值越大，泥边和坑底越柔和。
- *
- *  - Invert Normal XY
- *      如果你发现凹陷看起来像凸起，可以切换这个。
- *
- *  - Flip Green Channel
- *      如果法线 Y 方向上下反了，可以切换这个。
- *
- *  [Height Output]
- *  - Signed Height Output
- *      开启后：0.5 = 原地面，< 0.5 = 凹陷，> 0.5 = 凸起泥边。
- *      这对“既有凹陷又有外圈隆起”的脚印更合理。
- *
- *  [Output]
- *  - Put In Generated Folder
- *      是否把输出贴图放到源贴图同目录下的 Generated 文件夹。
- *
- *  - Select Generated Normal
- *      生成后是否自动选中 Normal 贴图。
- *
- *  ------------------------------------------------------------
- *  生成流程概览
- *  ------------------------------------------------------------
- *  BuildMaskData()
- *      读取源图，得到脚印内部布尔 mask。
- *
- *  BuildDistanceData()
- *      计算：
- *      - 脚印内部每个像素到外边界的距离
- *      - 脚印外部每个像素到脚印边界的距离
- *
- *  GenerateReliefMap()
- *      核心步骤。根据 mask + 距离场，生成一张 signed relief：
- *      - 内部是负值（凹陷）
- *      - 外圈泥边是正值（凸起）
- *
- *  CreateGeneratedDecalTexture()
- *      按 relief 生成颜色/透明度贴图。
- *
- *  CreateHeightTexture()
- *      把 signed relief 编码为高度图。
- *
- *  CreateNormalTextureFromRelief()
- *      从 relief 求梯度并编码成法线贴图。
- *
- *  ------------------------------------------------------------
- *  推荐起调参数
- *  ------------------------------------------------------------
- *  - 内部尽量平：
- *      Flat Interior = true
- *      Keep Heel Deeper When Flat = false
- *      Add Very Subtle Interior Noise = false
- *
- *  - 外圈更柔和：
- *      Generated Normal Strength = 5.5 ~ 6.8
- *      Relief Blur Iterations = 3 ~ 4
- *
- *  - 泥边更厚：
- *      Outer Lip Width = 22 ~ 28
- *      Outer Lip Height = 0.45 ~ 0.65
- * ============================================================
+ * 使用注意：
+ * - RT ClearColor.a 要是 0.5。
+ * - Brush / Accumulate / Ground shader 都要按 signed height 解码 A 通道。
  */
 
 using System;
@@ -190,56 +24,70 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Commented : EditorWindow
+public class FootprintReliefTextureGenerator : EditorWindow
 {
     private static class DefaultParams
     {
-        public const float AlphaThreshold = 0.5f;
+        public const float AlphaThreshold = 0.45f;
         public const bool PreferAlphaChannel = true;
 
         public const bool GenerateDecalTexture = true;
         public static readonly Color DecalRgb = new Color(0.34f, 0.37f, 0.25f, 1f);
-        public const float InnerAlpha = 0.68f;
-        public const float SoftEdgePixels = 5.0f;
+        public const float InnerAlpha = 0.5f;
+        public const float SoftEdgePixels = 10.0f;
 
         public const bool GenerateHeightTexture = true;
         public const bool GenerateNormalTexture = true;
         public const bool AddGeneratedNoise = false;
 
-        // 开关：鞋印内部是否保持平整。
-        // true = 坑底更像平面，只保留边缘过渡和前后深浅差；false = 坑底允许轻微泥面起伏。
-        public const bool FlatInterior = true;
+        // false = 内部不再是平底坑，而是有“碗形凹陷”坡度。
+        public const bool FlatInterior = false;
 
-        // Flat Interior 开启时，默认不再保留脚跟/前掌深浅差，这样坑底才是真正平的。
-        // 如果你想平底里仍然有很轻微的脚跟更深效果，可以打开这个开关。
-        public const bool KeepHeelDepthDifferenceWhenFlat = false;
+        // Flat Interior 开启时是否保留脚跟/前掌深浅差。
+        // 默认 true，避免完全死平。
+        public const bool KeepHeelDepthDifferenceWhenFlat = true;
 
-        public const float FlatInteriorDepthScale = 1.0f;
+        // Flat Interior 开启时的基础深度。
+        public const float FlatInteriorDepthScale = 0.58f;
 
-        public const float DepressionDepth = 1.18f;
-        public const int ReliefBlurIterations = 3;
-        public const float GeneratedNormalStrength = 6.8f;
+        // 内部碗形凹陷强度。
+        // 值越大，脚印内部越明显向中心/压力区下陷。
+        public const float InteriorBowlStrength = 0.42f;
+
+        // 内部碗形曲线。
+        // 小于 1 会让内部过渡更宽、更柔；大于 1 会让凹陷更集中。
+        public const float InteriorBowlPower = 0.65f;
+
+        // 脚心区域回弹 / 变浅强度。
+        // 值越大，脚心越浅，前掌和脚跟越突出。
+        public const float ArchLiftStrength = 0.16f;
+
+        public const float DepressionDepth = 1.0f;
+        public const int ReliefBlurIterations = 6;
+        public const float GeneratedNormalStrength = 5.0f;
         public const bool InvertNormalXY = false;
         public const bool FlipGreenChannel = false;
 
         public const bool InnerSideOnRight = true;
         public const bool ToeAtTop = true;
-        public const float OuterWallWidth = 22f;
-        public const float InnerWallWidth = 7.2f;
+        public const float OuterWallWidth = 60f;
+        public const float InnerWallWidth = 30f;
 
-        public const float OuterLipWidth = 22f;
-        public const float OuterLipHeight = 0.58f;
-        public const float OuterLipRoundness = 0.72f;
+        public const float OuterLipWidth = 44f;
+        public const float OuterLipHeight = 0.10f;
+        public const float OuterLipRoundness = 0.98f;
 
-        public const float FrontDepthScale = 0.82f;
-        public const float HeelDepthScale = 1.12f;
-        public const float WholeSoleInfluence = 0.18f;
+        public const float FrontDepthScale = 1.08f;
+        public const float HeelDepthScale = 1.18f;
+        public const float WholeSoleInfluence = 0.26f;
         public const bool SignedHeightOutput = true;
+
+        // 路线 B / Signed Height：0.5 = 原始地面，<0.5 = 下陷，>0.5 = 泥边隆起。
+        public const float HeightBackgroundValue = 0.5f;
 
         public const bool PutInGeneratedSubfolder = true;
         public const bool SelectGeneratedNormal = true;
     }
-
     [Header("Input")]
     [SerializeField] private float alphaThreshold = DefaultParams.AlphaThreshold;
     [SerializeField] private bool preferAlphaChannel = DefaultParams.PreferAlphaChannel;
@@ -268,6 +116,18 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
 
     [Tooltip("Flat Interior 开启且不保留前后深浅差时，整个坑底的统一深度系数。")]
     [SerializeField] private float flatInteriorDepthScale = DefaultParams.FlatInteriorDepthScale;
+
+    [Tooltip("内部碗形凹陷强度。值越大，脚印内部越向中心/压力区下陷。")]
+    [Range(0f, 1f)]
+    [SerializeField] private float interiorBowlStrength = DefaultParams.InteriorBowlStrength;
+
+    [Tooltip("内部碗形曲线。小于 1 更宽更柔，大于 1 更集中。")]
+    [Range(0.25f, 2f)]
+    [SerializeField] private float interiorBowlPower = DefaultParams.InteriorBowlPower;
+
+    [Tooltip("脚心区域变浅强度。值越大，脚心越浅，前掌/脚跟压痕越明显。")]
+    [Range(0f, 0.5f)]
+    [SerializeField] private float archLiftStrength = DefaultParams.ArchLiftStrength;
 
     [Header("Asymmetric Foot Shape")]
     [Tooltip("脚外侧更斜的坑壁宽度。")]
@@ -307,15 +167,19 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
     [Header("Normal Map")]
     [SerializeField] private float generatedNormalStrength = DefaultParams.GeneratedNormalStrength;
 
-    [Range(0, 5)]
+    [Range(0, 10)]
     [SerializeField] private int reliefBlurIterations = DefaultParams.ReliefBlurIterations;
 
     [SerializeField] private bool invertNormalXY = DefaultParams.InvertNormalXY;
     [SerializeField] private bool flipGreenChannel = DefaultParams.FlipGreenChannel;
 
     [Header("Height Output")]
-    [Tooltip("开启后 0.5 = 原地面，< 0.5 = 凹陷，> 0.5 = 粗泥边凸起。")]
+    [Tooltip("开启后高度图以“背景值”为基准，向下表达凹陷，向上表达凸起。关闭后只表达凹陷。")]
     [SerializeField] private bool signedHeightOutput = DefaultParams.SignedHeightOutput;
+
+    [Range(0f, 1f)]
+    [Tooltip("直接设置高度图背景 / 原地面的灰度值。0 = 黑，1 = 白。你现在要求纯白背景时就设为 1。")]
+    [SerializeField] private float heightBackgroundValue = DefaultParams.HeightBackgroundValue;
 
     [Header("Output")]
     [SerializeField] private bool putInGeneratedSubfolder = DefaultParams.PutInGeneratedSubfolder;
@@ -323,25 +187,25 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
 
     private Vector2 scroll;
 
-    [MenuItem("Tools/Footprints/Open Left-Foot Smooth Mud Lip Generator (Commented)")]
+    [MenuItem("Tools/Footprints/Open Relief Texture Generator")]
     private static void OpenWindow()
     {
-        var window = GetWindow<FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Commented>();
+        var window = GetWindow<FootprintReliefTextureGenerator>();
         window.titleContent = new GUIContent("Smooth Mud Lip Footprint");
         window.minSize = new Vector2(470, 690);
         window.Show();
     }
 
-    [MenuItem("Tools/Footprints/Generate Left-Foot Smooth Mud Lip (Commented) From Selected")]
+    [MenuItem("Tools/Footprints/Generate Relief Textures From Selected")]
     private static void GenerateSelectedWithDefaults()
     {
-        var temp = CreateInstance<FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Commented>();
+        var temp = CreateInstance<FootprintReliefTextureGenerator>();
         temp.ApplyDefaults();
         temp.GenerateForCurrentSelection();
         DestroyImmediate(temp);
     }
 
-    [MenuItem("Tools/Footprints/Generate Left-Foot Smooth Mud Lip (Commented) From Selected", true)]
+    [MenuItem("Tools/Footprints/Generate Relief Textures From Selected", true)]
     private static bool ValidateGenerateSelected()
     {
         foreach (UnityEngine.Object obj in Selection.objects)
@@ -390,14 +254,19 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
             flatInteriorDepthScale = EditorGUILayout.Slider("Flat Interior Depth Scale", flatInteriorDepthScale, 0.2f, 2f);
         }
 
+        DrawSectionTitle("Interior Bowl Depression");
+        interiorBowlStrength = EditorGUILayout.Slider("Interior Bowl Strength", interiorBowlStrength, 0f, 1f);
+        interiorBowlPower = EditorGUILayout.Slider("Interior Bowl Power", interiorBowlPower, 0.25f, 2f);
+        archLiftStrength = EditorGUILayout.Slider("Arch Lift Strength", archLiftStrength, 0f, 0.5f);
+
         DrawSectionTitle("Asymmetric Foot Shape");
-        outerWallWidth = EditorGUILayout.Slider("Outer Wall Width", outerWallWidth, 1f, 50f);
-        innerWallWidth = EditorGUILayout.Slider("Inner Wall Width", innerWallWidth, 1f, 24f);
+        outerWallWidth = EditorGUILayout.Slider("Outer Wall Width", outerWallWidth, 1f, 90f);
+        innerWallWidth = EditorGUILayout.Slider("Inner Wall Width", innerWallWidth, 1f, 60f);
         innerSideOnRight = EditorGUILayout.Toggle("Inner Side On Right", innerSideOnRight);
         toeAtTop = EditorGUILayout.Toggle("Toe At Top", toeAtTop);
 
         DrawSectionTitle("Smooth Mud Lip");
-        outerLipWidth = EditorGUILayout.Slider("Outer Lip Width", outerLipWidth, 0f, 36f);
+        outerLipWidth = EditorGUILayout.Slider("Outer Lip Width", outerLipWidth, 0f, 80f);
         outerLipHeight = EditorGUILayout.Slider("Outer Lip Height", outerLipHeight, 0f, 1.8f);
         outerLipRoundness = EditorGUILayout.Slider("Outer Lip Roundness", outerLipRoundness, 0.2f, 1.4f);
 
@@ -408,12 +277,13 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
 
         DrawSectionTitle("Normal Map");
         generatedNormalStrength = EditorGUILayout.Slider("Generated Normal Strength", generatedNormalStrength, 1f, 40f);
-        reliefBlurIterations = EditorGUILayout.IntSlider("Relief Blur Iterations", reliefBlurIterations, 0, 5);
+        reliefBlurIterations = EditorGUILayout.IntSlider("Relief Blur Iterations", reliefBlurIterations, 0, 10);
         invertNormalXY = EditorGUILayout.Toggle("Invert Normal XY", invertNormalXY);
         flipGreenChannel = EditorGUILayout.Toggle("Flip Green Channel", flipGreenChannel);
 
         DrawSectionTitle("Height Output");
         signedHeightOutput = EditorGUILayout.Toggle("Signed Height Output", signedHeightOutput);
+        heightBackgroundValue = EditorGUILayout.Slider("Height Background Value", heightBackgroundValue, 0f, 1f);
 
         DrawSectionTitle("Output");
         putInGeneratedSubfolder = EditorGUILayout.Toggle("Put In Generated Folder", putInGeneratedSubfolder);
@@ -469,6 +339,11 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         generateNormalTexture = DefaultParams.GenerateNormalTexture;
         addGeneratedNoise = DefaultParams.AddGeneratedNoise;
         flatInterior = DefaultParams.FlatInterior;
+        keepHeelDepthDifferenceWhenFlat = DefaultParams.KeepHeelDepthDifferenceWhenFlat;
+        flatInteriorDepthScale = DefaultParams.FlatInteriorDepthScale;
+        interiorBowlStrength = DefaultParams.InteriorBowlStrength;
+        interiorBowlPower = DefaultParams.InteriorBowlPower;
+        archLiftStrength = DefaultParams.ArchLiftStrength;
         depressionDepth = DefaultParams.DepressionDepth;
 
         outerWallWidth = DefaultParams.OuterWallWidth;
@@ -490,6 +365,7 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         flipGreenChannel = DefaultParams.FlipGreenChannel;
 
         signedHeightOutput = DefaultParams.SignedHeightOutput;
+        heightBackgroundValue = DefaultParams.HeightBackgroundValue;
 
         putInGeneratedSubfolder = DefaultParams.PutInGeneratedSubfolder;
         selectGeneratedNormal = DefaultParams.SelectGeneratedNormal;
@@ -825,13 +701,6 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         return innerSideOnRight ? t : (1f - t);
     }
 
-    /// <summary>
-    /// 生成 signed relief（浮雕高度场）。
-    /// 约定：
-    /// - 负值：脚印内部的凹陷
-    /// - 正值：脚印外圈的泥边隆起
-    /// 这一步是整个工具最核心的逻辑。
-    /// </summary>
     private float[] GenerateReliefMap(MaskData maskData, DistanceData distanceData, int width, int height)
     {
         float[] relief = new float[width * height];
@@ -843,17 +712,36 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         float lipHeight = Mathf.Max(0f, outerLipHeight);
         float lipRoundness = Mathf.Max(0.2f, outerLipRoundness);
 
-        float interiorNoiseStrength = (!flatInterior && addGeneratedNoise) ? depth * 0.018f : 0f;
+        // 找出脚印内部最大距离，用来把“离边缘距离”归一化成 0~1。
+        // 这个值是内部碗形凹陷的基础：边缘浅，越靠中心越深。
+        float maxInsideDistance = 1f;
+        for (int i = 0; i < maskData.mask.Length; i++)
+        {
+            if (maskData.mask[i])
+                maxInsideDistance = Mathf.Max(maxInsideDistance, distanceData.distanceToOutside[i]);
+        }
+
+        float bowlStrength = Mathf.Clamp01(interiorBowlStrength);
+        float bowlPower = Mathf.Max(0.25f, interiorBowlPower);
+        float archLift = Mathf.Clamp01(archLiftStrength);
+
+        float interiorNoiseStrength = (!flatInterior && addGeneratedNoise) ? depth * 0.014f : 0f;
 
         for (int y = 0; y < height; y++)
         {
             float toe01 = GetToeAxis01(maskData, y);
             float heel01 = 1f - toe01;
 
+            // 压力分布：前掌和脚跟更深，脚心略浅。
+            // 注意这里不要直接让 pressure 变成横向色带；后面会乘以 bowl01，形成连续内部坡度。
             float heelPatch = Gaussian01(toe01, 0.17f, 0.18f) * heelDepthScale;
-            float forePatch = Gaussian01(toe01, 0.74f, 0.18f) * frontDepthScale;
-            float midPatch = Gaussian01(toe01, 0.46f, 0.25f) * (wholeSoleInfluence * 0.38f);
-            float pressure = Mathf.Clamp01(wholeSoleInfluence + heelPatch + forePatch + midPatch);
+            float forePatch = Gaussian01(toe01, 0.76f, 0.20f) * frontDepthScale;
+            float archPatch = Gaussian01(toe01, 0.48f, 0.18f);
+            float midPatch = Gaussian01(toe01, 0.46f, 0.25f) * (wholeSoleInfluence * 0.35f);
+
+            float pressure = wholeSoleInfluence + heelPatch * 0.38f + forePatch * 0.34f + midPatch;
+            pressure -= archPatch * archLift;
+            pressure = Mathf.Clamp01(pressure);
 
             for (int x = 0; x < width; x++)
             {
@@ -867,47 +755,66 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
                     float localWallWidth = safeOuterWall * outerSide01 + safeInnerWall * innerSide01;
                     float dIn = distanceData.distanceToOutside[i];
 
-                    // Flat Interior 开启时：边缘仍然有斜坡 / 垂直边差异，
-                    // 但坑底会更快进入平面，内部不会一直缓慢弯曲。
-                    float effectiveWallWidth = flatInterior ? localWallWidth * 0.68f : localWallWidth;
-                    float inner01 = Smoother01(Mathf.Clamp01(dIn / Mathf.Max(0.001f, effectiveWallWidth)));
-                    if (flatInterior && dIn >= effectiveWallWidth)
-                        inner01 = 1f;
+                    // 坑壁坡度：边缘 0，进入脚印内部后逐渐到 1。
+                    // 它负责边缘软过渡。
+                    float wall01 = Smoother01(Mathf.Clamp01(dIn / localWallWidth));
+
+                    // 内部碗形：基于“离边缘距离 / 内部最大距离”。
+                    // 边缘浅，越靠内部越深；power < 1 会让凹陷更宽、更柔。
+                    float center01 = Smoother01(Mathf.Clamp01(dIn / maxInsideDistance));
+                    float bowl01 = Mathf.Pow(center01, bowlPower);
+
+                    // 轻微脚心回弹：让脚心区域比前掌/脚跟浅一些。
+                    float archLift01 = archPatch * archLift;
+
+                    float depthScale;
+
+                    if (flatInterior)
+                    {
+                        // 仍允许 FlatInterior，但不再强制死平：
+                        // 基础是统一深度，叠加少量 bowl，让内部也能有一点凹陷坡度。
+                        if (keepHeelDepthDifferenceWhenFlat)
+                        {
+                            float heelBlend = Smoother01(heel01);
+                            depthScale = Mathf.Lerp(frontDepthScale, heelDepthScale, heelBlend) * flatInteriorDepthScale;
+                        }
+                        else
+                        {
+                            depthScale = flatInteriorDepthScale;
+                        }
+
+                        depthScale += bowl01 * bowlStrength * 0.35f;
+                        depthScale -= archLift01 * 0.25f;
+                    }
+                    else
+                    {
+                        // 非平底模式：真正的内部碗形凹陷。
+                        // pressure 决定前掌/脚跟更深，bowl01 决定从边缘到内部的连续坡度。
+                        depthScale = wholeSoleInfluence;
+                        depthScale += bowl01 * bowlStrength;
+                        depthScale += pressure;
+                        depthScale -= archLift01;
+                    }
+
+                    depthScale = Mathf.Clamp01(depthScale);
 
                     float noise = 0f;
                     if (addGeneratedNoise && interiorNoiseStrength > 0f)
                     {
-                        float noiseFade = Smoother01(Mathf.Clamp01((dIn - 5f) / 16f));
-                        float n1 = SignedNoise(x / 42f, y / 42f, 211);
-                        float n2 = SignedNoise(x / 18f, y / 18f, 227);
-                        noise = (n1 * 0.70f + n2 * 0.30f) * interiorNoiseStrength * noiseFade;
+                        float noiseFade = Smoother01(Mathf.Clamp01((dIn - 5f) / 24f));
+                        float n1 = SignedNoise(x / 52f, y / 52f, 211);
+                        float n2 = SignedNoise(x / 24f, y / 24f, 227);
+                        noise = (n1 * 0.72f + n2 * 0.28f) * interiorNoiseStrength * noiseFade;
                     }
 
-                    float interiorDepthScale;
-                    if (flatInterior)
-                    {
-                        // 关键修正：Flat Interior 开启时，坑底不能再继续使用 pressure，
-                        // 否则前掌 / 脚跟压力曲线会在内部形成你截图里的横向色带。
-                        // 默认用统一深度，让坑底真正平整。
-                        if (keepHeelDepthDifferenceWhenFlat)
-                        {
-                            float heelBlend = Smoother01(heel01);
-                            interiorDepthScale = Mathf.Lerp(frontDepthScale, heelDepthScale, heelBlend);
-                        }
-                        else
-                        {
-                            interiorDepthScale = flatInteriorDepthScale;
-                        }
-                    }
-                    else
-                    {
-                        interiorDepthScale = pressure;
-                    }
-
-                    relief[i] = -depth * interiorDepthScale * inner01 + noise;
+                    // 最终内部高度：
+                    // wall01 控制边缘软坡，depthScale + bowl01 控制内部不是平底。
+                    relief[i] = -depth * depthScale * wall01 + noise;
                 }
                 else
                 {
+                    // 外部泥边 / 隆起。
+                    // 只在脚印外侧 lipWidth 范围内产生正高度。
                     float dOut = distanceData.distanceToInside[i];
                     if (dOut >= lipWidth)
                     {
@@ -916,16 +823,20 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
                     }
 
                     float t = Mathf.Clamp01(dOut / lipWidth);
+
+                    // 宽而低的圆润泥边，不做尖锐高峰。
                     float shoulder = Mathf.Pow(1f - t, lipRoundness);
-                    float peakCenter = 0.40f;
-                    float peakWidth = 0.30f + (1.0f - lipRoundness) * 0.08f;
+                    float peakCenter = 0.42f;
+                    float peakWidth = 0.34f + (1.0f - lipRoundness) * 0.08f;
                     float peak = Mathf.Exp(-0.5f * Mathf.Pow((t - peakCenter) / Mathf.Max(0.001f, peakWidth), 2f));
                     float outFade = Smoother01(1f - t);
-                    float edgeFade = Mathf.Lerp(0.55f, 1f, Smoother01(Mathf.Clamp01(t / 0.22f)));
+                    float edgeFade = Mathf.Lerp(0.45f, 1f, Smoother01(Mathf.Clamp01(t / 0.24f)));
 
-                    float rim = lipHeight * (0.44f * shoulder + 0.78f * peak) * outFade * edgeFade;
+                    float rim = lipHeight * (0.36f * shoulder + 0.70f * peak) * outFade * edgeFade;
+
+                    // 外侧泥边略强，脚跟略强，模拟被脚挤出去的泥。
                     float sideBias = 1f + 0.08f * outerSide01 - 0.04f * innerSide01;
-                    float heelBias = 1f + 0.08f * heel01;
+                    float heelBias = 1f + 0.06f * heel01;
 
                     relief[i] = Mathf.Max(0f, rim * sideBias * heelBias);
                 }
@@ -935,10 +846,6 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         return relief;
     }
 
-    /// <summary>
-    /// 根据 relief 生成一张颜色贴图（Decal）。
-    /// 内部凹陷区域会更明显，泥边区域会略带抬起感和更高 alpha。
-    /// </summary>
     private Texture2D CreateGeneratedDecalTexture(MaskData maskData, DistanceData distanceData, float[] relief, int width, int height)
     {
         Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
@@ -1006,10 +913,6 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         return texture;
     }
 
-    /// <summary>
-    /// 把 signed relief 编码成高度图。
-    /// 开启 SignedHeightOutput 时：0.5 代表原地面，低于 0.5 是凹陷，高于 0.5 是凸起。
-    /// </summary>
     private Texture2D CreateHeightTexture(float[] relief, int width, int height)
     {
         Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
@@ -1023,10 +926,36 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         {
             float h;
 
+            float baseHeight = Mathf.Clamp01(heightBackgroundValue);
+
             if (signedHeightOutput)
-                h = 0.5f + relief[i] / (2f * maxAbs);
+            {
+                // 以“背景值 / 原地面值”为基准：
+                // - relief < 0：往更黑的方向走，表示凹陷
+                // - relief > 0：往更白的方向走，表示凸起
+                //
+                // 这里不用固定 0.5 作为地面，而是直接用用户设置的背景值。
+                // 例如：
+                // - baseHeight = 1   -> 背景纯白，只能完整表达凹陷；凸起没有更高空间了
+                // - baseHeight = 0.5 -> 和传统 signed height 很接近
+                // - baseHeight = 0.8 -> 还能留一点空间给凸起，但背景已经比较亮
+                float upRoom = 1f - baseHeight;
+                float downRoom = baseHeight;
+
+                if (relief[i] >= 0f)
+                    h = maxUp > 0f ? baseHeight + (relief[i] / maxUp) * upRoom : baseHeight;
+                else
+                    h = maxDown > 0f ? baseHeight + (relief[i] / maxDown) * downRoom : baseHeight;
+            }
             else
-                h = relief[i] < 0f ? Mathf.Clamp01(1f + relief[i] / maxDown) : 1f;
+            {
+                // 非 signed 模式：
+                // 高度图只表达凹陷，不表达凸起。
+                // 背景固定为用户设置值，脚印凹陷向更黑的方向下降。
+                h = relief[i] < 0f
+                    ? Mathf.Clamp01(baseHeight * (1f + relief[i] / maxDown))
+                    : baseHeight;
+            }
 
             h = Mathf.Clamp01(h);
             colors[i] = new Color(h, h, h, 1f);
@@ -1037,10 +966,6 @@ public class FootprintReliefTextureGenerator_LeftFootSmoothLip_FlatFixed_Comment
         return texture;
     }
 
-    /// <summary>
-    /// 从 relief 生成法线贴图。
-    /// 这里用的是 Sobel 风格的邻域梯度近似。
-    /// </summary>
     private Texture2D CreateNormalTextureFromRelief(float[] relief, int width, int height, float strength, bool invertXY, bool flipGreen)
     {
         Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, true);

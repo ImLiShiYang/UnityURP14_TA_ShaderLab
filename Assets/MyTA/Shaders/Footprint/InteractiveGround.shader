@@ -11,15 +11,27 @@ Shader "Footprints/InteractiveGround"
         _ShadowStrength ("Shadow Strength", Range(0,1)) = 0.9
         _MinShadow ("Min Shadow Light", Range(0,1)) = 0.15
 
-        [Header(Footprint RT)]
-        _FootstepTex ("Footstep RT RGB Normal A Mask", 2D) = "black" {}
+        [Header(Footprint RT Signed Height)]
+        _FootstepTex ("Footstep RT RGB Normal A Signed Height", 2D) = "gray" {}
         _FootstepRect ("Footstep Rect", Vector) = (0,0,1,1)
         _EnableFootstep ("Enable Footstep", Float) = 0
 
+        [Header(Footprint Mask)]
+        _FootprintStrength ("Footprint Strength", Range(0,2)) = 1
+        _FootprintSignedDeadZone ("Signed Height Dead Zone", Range(0,0.2)) = 0.005
+
         [Header(Footprint Normal)]
-        _FootprintStrength ("Footprint Mask Strength", Range(0,2)) = 1
-        _FootprintNormalStrength ("Footprint Normal Strength", Range(0,3)) = 1
+        _FootprintNormalStrength ("Footprint Normal Strength", Range(0,3)) = 1.5
         [Toggle] _FlipFootprintNormalY ("Flip Footprint Normal Y", Float) = 0
+
+        [Header(Footprint AO)]
+        _FootprintAOStrength ("Footprint AO Strength", Range(0,1)) = 0.25
+        _FootprintAOSmoothMin ("Footprint AO Smooth Min", Range(0,1)) = 0.02
+        _FootprintAOSmoothMax ("Footprint AO Smooth Max", Range(0,1)) = 0.45
+        _FootprintSpecOcclusion ("Footprint Spec Occlusion", Range(0,1)) = 0.35
+
+        [Header(Footprint Rim)]
+        _FootprintRimLightStrength ("Footprint Rim Light Strength", Range(0,0.5)) = 0.08
 
         [Header(Blinn Phong)]
         _SpecColor ("Spec Color", Color) = (1,1,1,1)
@@ -76,8 +88,17 @@ Shader "Footprints/InteractiveGround"
                 half _EnableFootstep;
 
                 half _FootprintStrength;
+                half _FootprintSignedDeadZone;
+
                 half _FootprintNormalStrength;
                 half _FlipFootprintNormalY;
+
+                half _FootprintAOStrength;
+                half _FootprintAOSmoothMin;
+                half _FootprintAOSmoothMax;
+                half _FootprintSpecOcclusion;
+
+                half _FootprintRimLightStrength;
 
                 half4 _SpecColor;
                 half _SpecStrength;
@@ -104,6 +125,23 @@ Shader "Footprints/InteractiveGround"
                 return normalize(normalRGB * 2.0h - 1.0h);
             }
 
+            half SafeSmoothStep(half minVal, half maxVal, half x)
+            {
+                maxVal = max(maxVal, minVal + 0.0001h);
+                return smoothstep(minVal, maxVal, x);
+            }
+
+            half ApplySignedDeadZone(half signedValue, half deadZone)
+            {
+                half absValue = abs(signedValue);
+
+                if (absValue <= deadZone)
+                    return 0.0h;
+
+                half remapped = (absValue - deadZone) / max(0.0001h, 1.0h - deadZone);
+                return sign(signedValue) * saturate(remapped);
+            }
+
             float2 WorldXZToFootUV(float3 positionWS)
             {
                 float2 footUV;
@@ -112,7 +150,7 @@ Shader "Footprints/InteractiveGround"
                 return footUV;
             }
 
-            float FootUVInside(float2 uv)
+            half FootUVInside(float2 uv)
             {
                 return
                     step(0.0, uv.x) *
@@ -121,49 +159,41 @@ Shader "Footprints/InteractiveGround"
                     step(uv.y, 1.0);
             }
 
-            // 这里构造的是“脚印投影 UV”的切线空间：
-            // T 对应 footUV.x，也就是世界 X 方向；
-            // B 对应 footUV.y，也就是世界 Z 方向；
-            // N 是当前地表法线。
-            half3 FootprintNormalTangentToWorld(half3 normalTS, half3 baseNormalWS)
+            float3 NormalizeSafeCustom(float3 v)
             {
-                half3 N = normalize(baseNormalWS);
+                return v * rsqrt(max(dot(v, v), 1e-6));
+            }
 
-                half3 worldX = half3(1.0h, 0.0h, 0.0h);
-                half3 worldZ = half3(0.0h, 0.0h, 1.0h);
+            half3 FootprintNormalToWorld(half3 footprintNormal, half3 baseNormalWS)
+            {
+                float3 N = NormalizeSafeCustom(baseNormalWS);
 
-                // 把世界 X 投影到当前地表切平面上，作为 T。
-                half3 T = worldX - N * dot(worldX, N);
+                float3 worldX = float3(1.0, 0.0, 0.0);
+                float3 worldZ = float3(0.0, 0.0, 1.0);
 
-                // 极端情况下，如果法线几乎平行 worldX，就改用 worldZ。
-                if (dot(T, T) < 0.0001h)
-                {
-                    T = worldZ - N * dot(worldZ, N);
-                }
+                float3 tangentX = worldX - N * dot(worldX, N);
+                float3 tangentZ = worldZ - N * dot(worldZ, N);
 
-                T = normalize(T);
+                tangentX = NormalizeSafeCustom(tangentX);
+                tangentZ = NormalizeSafeCustom(tangentZ);
 
-                // 为了让 normalTS.y 在水平地面上对应世界 +Z，
-                // 这里使用 cross(T, N)。
-                half3 B = normalize(cross(T, N));
+                float3 nWS =
+                    tangentX * footprintNormal.x +
+                    tangentZ * footprintNormal.y +
+                    N        * footprintNormal.z;
 
-                return normalize(
-                    normalTS.x * T +
-                    normalTS.y * B +
-                    normalTS.z * N
-                );
+                return normalize((half3)nWS);
             }
 
             Varyings Vert(Attributes IN)
             {
                 Varyings OUT;
 
-                VertexPositionInputs posInput = GetVertexPositionInputs(IN.positionOS.xyz);
-                VertexNormalInputs normalInput = GetVertexNormalInputs(IN.normalOS);
+                VertexPositionInputs posInputs = GetVertexPositionInputs(IN.positionOS.xyz);
 
-                OUT.positionHCS = posInput.positionCS;
-                OUT.positionWS = posInput.positionWS;
-                OUT.normalWS = normalInput.normalWS;
+                OUT.positionHCS = posInputs.positionCS;
+                OUT.positionWS = posInputs.positionWS;
+                OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
                 OUT.uv = TRANSFORM_TEX(IN.uv, _BaseMap);
 
                 return OUT;
@@ -172,85 +202,141 @@ Shader "Footprints/InteractiveGround"
             half4 Frag(Varyings IN) : SV_Target
             {
                 // =====================================================
-                // 1. 基础颜色
+                // 1. Base
                 // =====================================================
-                half4 baseTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv);
-                half3 albedo = baseTex.rgb * _BaseColor.rgb;
+                half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv);
+                half3 albedo = baseSample.rgb * _BaseColor.rgb * _Brightness;
+
+                half3 baseNormalWS = normalize(IN.normalWS);
+                half3 finalNormalWS = baseNormalWS;
 
                 // =====================================================
-                // 2. 采样脚印 RT
+                // 2. Footprint RT Signed Height
                 // =====================================================
                 float2 footUV = WorldXZToFootUV(IN.positionWS);
-                float inside = FootUVInside(footUV);
+                half inside = FootUVInside(footUV);
 
                 half4 foot = SAMPLE_TEXTURE2D(_FootstepTex, sampler_FootstepTex, footUV);
 
-                half footprintMask = saturate(
-                    foot.a *
-                    inside *
-                    _EnableFootstep *
-                    _FootprintStrength
+                // 新协议：
+                // A = 0.5  表示原始地面
+                // A < 0.5  表示下陷
+                // A > 0.5  表示泥边隆起
+                half signedFoot = (foot.a - 0.5h) * 2.0h;
+
+                signedFoot = ApplySignedDeadZone(signedFoot, _FootprintSignedDeadZone);
+
+                signedFoot *= inside * _EnableFootstep;
+
+                // 下陷区域
+                half depressionRaw = saturate(-signedFoot);
+
+                // 隆起泥边区域
+                half rimRaw = saturate(signedFoot);
+
+                // 总影响区域，给法线混合用
+                half influenceRaw = saturate(abs(signedFoot));
+
+                half influenceMask = SafeSmoothStep(
+                    _FootprintAOSmoothMin,
+                    _FootprintAOSmoothMax,
+                    influenceRaw
+                );
+
+                influenceMask = saturate(influenceMask * _FootprintStrength);
+
+                half depressionMask = SafeSmoothStep(
+                    _FootprintAOSmoothMin,
+                    _FootprintAOSmoothMax,
+                    depressionRaw
+                );
+
+                depressionMask = saturate(depressionMask * _FootprintStrength);
+
+                half rimMask = SafeSmoothStep(
+                    _FootprintAOSmoothMin,
+                    _FootprintAOSmoothMax,
+                    rimRaw
+                );
+
+                rimMask = saturate(rimMask * _FootprintStrength);
+
+                // =====================================================
+                // 3. Footprint Normal Blend
+                // =====================================================
+                half3 footprintNormal = DecodeNormalRGB(foot.rgb);
+
+                if (_FlipFootprintNormalY > 0.5h)
+                {
+                    footprintNormal.y = -footprintNormal.y;
+                }
+
+                half3 footprintNormalWS = FootprintNormalToWorld(
+                    footprintNormal,
+                    baseNormalWS
+                );
+
+                half normalBlend = saturate(influenceMask * _FootprintNormalStrength);
+
+                finalNormalWS = normalize(lerp(
+                    finalNormalWS,
+                    footprintNormalWS,
+                    normalBlend
+                ));
+
+                // =====================================================
+                // 4. AO / Rim Color Blend
+                // =====================================================
+                // AO 主要只压暗下陷区域，不应该把隆起泥边也整体压黑。
+                half footprintAO = 1.0h - depressionMask * _FootprintAOStrength;
+                albedo *= footprintAO;
+
+                // 泥边是高于地面的区域，可以非常轻微提亮一点。
+                // 数值不要太大，否则会像白描边。
+                albedo = lerp(
+                    albedo,
+                    albedo * 1.06h,
+                    rimMask * _FootprintRimLightStrength
                 );
 
                 // =====================================================
-                // 3. 切线空间脚印法线 -> 世界空间法线
-                // =====================================================
-                half3 baseNormalWS = normalize(IN.normalWS);
-
-                half3 footNormalTS = DecodeNormalRGB(foot.rgb);
-
-                // 不同 normal 贴图来源可能 Y 方向相反。
-                // 如果脚印凹凸方向看起来反了，就打开这个开关。
-                if (_FlipFootprintNormalY > 0.5h)
-                {
-                    footNormalTS.y = -footNormalTS.y;
-                }
-
-                // 用 mask 控制法线强度。
-                // mask = 0 时 normalTS 约等于 (0,0,1)，不会影响地面。
-                half normalStrength = footprintMask * _FootprintNormalStrength;
-                half3 finalNormalTS = normalize(half3(
-                    footNormalTS.xy * normalStrength,
-                    max(footNormalTS.z, 0.001h)
-                ));
-
-                half3 normalWS = FootprintNormalTangentToWorld(finalNormalTS, baseNormalWS);
-
-                // =====================================================
-                // 4. Blinn-Phong 光照
+                // 5. Lighting
                 // =====================================================
                 float4 shadowCoord = TransformWorldToShadowCoord(IN.positionWS);
                 Light mainLight = GetMainLight(shadowCoord);
 
                 half3 lightDirWS = normalize(mainLight.direction);
-                half3 viewDirWS = normalize(GetWorldSpaceViewDir(IN.positionWS));
-                half3 halfDirWS = normalize(lightDirWS + viewDirWS);
+                half3 viewDirWS = normalize(_WorldSpaceCameraPos.xyz - IN.positionWS);
 
-                half ndotl = saturate(dot(normalWS, lightDirWS));
-                half ndoth = saturate(dot(normalWS, halfDirWS));
+                half ndotl = saturate(dot(finalNormalWS, lightDirWS));
 
-                half rawShadow = mainLight.shadowAttenuation;
-                half shadow = lerp(1.0h, rawShadow, _ShadowStrength);
-                shadow = max(shadow, _MinShadow);
+                half shadowAtten = mainLight.shadowAttenuation;
+                shadowAtten = lerp(1.0h, max(_MinShadow, shadowAtten), _ShadowStrength);
 
-                half lightAtten = mainLight.distanceAttenuation * shadow;
+                half lightAtten = mainLight.distanceAttenuation * shadowAtten;
 
-                half3 ambient = SampleSH(normalWS);
-                ambient = max(ambient, half3(0.05h, 0.05h, 0.05h));
+                half3 ambient = SampleSH(finalNormalWS);
+                half3 direct = mainLight.color * ndotl * lightAtten;
 
-                half3 diffuse = mainLight.color * ndotl * lightAtten;
+                half3 color = albedo * (ambient + direct);
+
+                // =====================================================
+                // 6. Blinn Phong Specular
+                // =====================================================
+                half3 halfDir = normalize(lightDirWS + viewDirWS);
+                half ndoth = saturate(dot(finalNormalWS, halfDir));
 
                 half specTerm = pow(ndoth, _SpecPower);
                 specTerm *= _SpecStrength;
                 specTerm *= step(0.001h, ndotl);
                 specTerm *= lightAtten;
 
-                half3 specular = mainLight.color * _SpecColor.rgb * specTerm;
+                // 下陷处高光稍微弱一点，泥边不压太多。
+                specTerm *= 1.0h - depressionMask * _FootprintSpecOcclusion;
 
-                half3 finalColor = albedo * (ambient + diffuse) + specular;
-                finalColor *= _Brightness;
+                color += specTerm * _SpecColor.rgb * mainLight.color;
 
-                return half4(finalColor, 1.0h);
+                return half4(color, 1.0h);
             }
 
             ENDHLSL

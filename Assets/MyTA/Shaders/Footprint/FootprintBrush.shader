@@ -9,7 +9,7 @@ Shader "Footprints/URP_FootprintBrush_NormalHeightSeparate"
         _HeightStrength ("Height Strength", Range(0, 2)) = 1
 
         // 你的图是：鞋印黑、背景白，所以默认反转。
-        _InvertHeight ("Invert Height", Float) = 1
+        _InvertHeight ("Invert Height", Float) = 0
     }
 
     SubShader
@@ -91,24 +91,39 @@ Shader "Footprints/URP_FootprintBrush_NormalHeightSeparate"
                 half3 neutralNormal = half3(0.5h, 0.5h, 1.0h);
 
                 // 4. 采样高度图。
-                // 你的 HeightTex 仍然建议保持 Default + sRGB Off。
+                // HeightTex 新语义：
+                // 0.5 = 原始地面
+                // <0.5 = 下陷
+                // >0.5 = 泥边隆起
                 half heightR = SAMPLE_TEXTURE2D(_HeightTex, sampler_HeightTex, IN.uvHeight).r;
 
-                // 5. 你的高度图语义：
-                // 背景白 = 1
-                // 脚印黑/灰 = 下陷
-                // 所以默认 _InvertHeight = 1。
-                half depression = lerp(heightR, 1.0h - heightR, saturate(_InvertHeight));
-                depression = saturate(depression * _HeightStrength);
+                // 转成 signed height:
+                // -1 = 最深下陷
+                //  0 = 原始地面
+                // +1 = 最高隆起
+                half signedHeight = (heightR - 0.5h) * 2.0h;
 
-                // 6. 没有脚印的地方直接不写入 CurrentBrushRT。
-                // 这样可以避免 Quad 透明背景覆盖已有脚印。
-                clip(depression - 0.0001h);
+                // 如果你的高度图黑色是下陷、白色是隆起，_InvertHeight 应该设为 0。
+                // 如果方向反了，再设为 1。
+                signedHeight = lerp(signedHeight, -signedHeight, saturate(_InvertHeight));
 
-                // 7. 输出给 CurrentBrushRT。
-                // RGB = 编码后的法线
-                // A   = 脚印强度 / mask
-                return half4(normalRGB, depression);
+                // 强度缩放
+                signedHeight = clamp(signedHeight * _HeightStrength, -1.0h, 1.0h);
+
+                // 影响强度。
+                // 下陷和隆起都算有效影响。
+                half influence = abs(signedHeight);
+
+                // 没有高度变化的地方不写入 CurrentBrushRT。
+                clip(influence - 0.001h);
+
+                // 重新编码到 A 通道：
+                // signedHeight = -1 -> A = 0
+                // signedHeight =  0 -> A = 0.5
+                // signedHeight = +1 -> A = 1
+                half encodedSignedHeight = signedHeight * 0.5h + 0.5h;
+
+                return half4(normalRGB, encodedSignedHeight);
             }
             ENDHLSL
         }

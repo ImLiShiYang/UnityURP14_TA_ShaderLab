@@ -90,21 +90,28 @@ Shader "Hidden/Footprints/FootprintAccumulate"
             {
                 float2 uv = IN.uv;
 
+                const half EPS = 0.001h;
+
                 half3 defaultNormal = half3(0.0h, 0.0h, 1.0h);
-                half3 defaultRGB = half3(0.5h, 0.5h, 1.0h);
 
                 // =====================================================
                 // 1. 当前帧 Brush
                 // =====================================================
                 half4 cur = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv);
-                // return cur;
 
-                // 当前帧高度 / mask
-                half curHeight = saturate(cur.a);
+                // A 通道解码：
+                // A = 0.5 表示无变化
+                // A < 0.5 表示下陷
+                // A > 0.5 表示隆起
+                half curSigned = (cur.a - 0.5h) * 2.0h;
+                half curInfluence = abs(curSigned);
 
-                // 当前帧没有脚印的地方，不允许 cur.rgb 参与混合
-                half3 curNormal = DecodeNormalRGB(cur.rgb);
-                curNormal = normalize(lerp(defaultNormal, curNormal, step(0.0001h, curHeight)));
+                half3 curNormal = defaultNormal;
+
+                if (curInfluence > EPS)
+                {
+                    curNormal = DecodeNormalRGB(cur.rgb);
+                }
 
 
                 // =====================================================
@@ -119,57 +126,73 @@ Shader "Hidden/Footprints/FootprintAccumulate"
                     step(lastUV.y, 1.0);
 
                 lastUV = SnapUVToTexel(lastUV, _LastTex_TexelSize);
+
                 half4 lastSample = SAMPLE_TEXTURE2D(_LastTex, sampler_LastTex, lastUV);
 
-                // 超出范围就当作没有历史脚印
-                half lastHeight = saturate(lastSample.a * inside);
+                half lastSigned = (lastSample.a - 0.5h) * 2.0h;
 
-                // 只对历史高度淡出
-                lastHeight = saturate(lastHeight - _ReduceVal);
+                // 超出范围就当作无高度变化
+                lastSigned *= inside;
 
-                // 历史没有脚印的地方，历史法线强制默认
-                half3 lastNormal = DecodeNormalRGB(lastSample.rgb);
-                lastNormal = normalize(lerp(defaultNormal, lastNormal, step(0.0001h, lastHeight)));
+                // 淡出 signed height：
+                // 不管是下陷还是隆起，都往 0 衰减。
+                half lastAbs = abs(lastSigned);
+                lastAbs = saturate(lastAbs - _ReduceVal);
+                lastSigned = sign(lastSigned) * lastAbs;
 
+                half lastInfluence = abs(lastSigned);
 
-                // =====================================================
-                // 3. 合并高度
-                // =====================================================
-                half outHeight = max(curHeight, lastHeight);
+                half3 lastNormal = defaultNormal;
 
-
-                // =====================================================
-                // 4. 合并法线
-                // =====================================================
-                half3 mixedNormal = lastNormal;
-
-                // 只有当前帧有脚印时，才 Whiteout 混合当前法线
-                if (curHeight > lastHeight)
+                if (lastInfluence > EPS)
                 {
-                    mixedNormal = curNormal;
-                    // mixedNormal=WhiteoutBlend(curHeight,lastHeight);
+                    lastNormal = DecodeNormalRGB(lastSample.rgb);
                 }
 
 
-                // 如果最终没有脚印，强制默认法线
-                mixedNormal = normalize(lerp(defaultNormal, mixedNormal, step(0.0001h, outHeight)));
+                // =====================================================
+                // 3. 合并 signed height
+                // =====================================================
+                // 谁的绝对高度变化更强，就保留谁。
+                half outSigned = lastSigned;
+                half3 mixedNormal = lastNormal;
+
+                if (curInfluence > lastInfluence)
+                {
+                    outSigned = curSigned;
+                    mixedNormal = curNormal;
+                }
 
 
                 // =====================================================
-                // 5. 边缘渐隐
+                // 4. 边缘渐隐
                 // =====================================================
                 float edgeX = min(uv.x, 1.0 - uv.x);
                 float edgeY = min(uv.y, 1.0 - uv.y);
                 float edge = saturate(min(edgeX, edgeY) * _EdgeSoftness);
 
-                outHeight *= edge;
+                // signed height 往 0 衰减
+                outSigned *= edge;
 
-                // 边缘没有脚印时，法线也回默认
-                mixedNormal = normalize(lerp(defaultNormal, mixedNormal, step(0.0001h, outHeight)));
+                half outInfluence = abs(outSigned);
+
+                if (outInfluence <= EPS)
+                {
+                    mixedNormal = defaultNormal;
+                    outSigned = 0.0h;
+                }
+
+                mixedNormal = normalize(mixedNormal);
 
                 half3 outRGB = EncodeNormalRGB(mixedNormal);
 
-                return half4(outRGB, outHeight);
+                // 编码回 A:
+                // -1 -> 0
+                //  0 -> 0.5
+                // +1 -> 1
+                half outA = outSigned * 0.5h + 0.5h;
+
+                return half4(outRGB, outA);
             }
 
             ENDHLSL
