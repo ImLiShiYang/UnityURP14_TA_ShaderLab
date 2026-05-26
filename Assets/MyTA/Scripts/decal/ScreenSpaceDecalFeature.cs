@@ -205,9 +205,10 @@ public class ScreenSpaceDecalFeature : ScriptableRendererFeature
             _settings = settings;
             renderPassEvent = settings.renderPassEvent;
 
-            // 告诉 URP：这个 pass 需要 _CameraDepthTexture。
-            // Shader 会采样深度图来重建当前像素的 world position。
-            ConfigureInput(ScriptableRenderPassInput.Depth);
+            // 告诉 URP：这个 pass 需要 _CameraDepthTexture 和 _CameraOpaqueTexture。
+            // Depth：Shader 采样深度图来重建当前像素的 world position。
+            // Color：GroundColorOnly shader 会采样不透明颜色，直接使用地面本身颜色，不再依赖 BaseMap。
+            ConfigureInput(ScriptableRenderPassInput.Depth | ScriptableRenderPassInput.Color);
 
             _cubeMesh = CreateCubeMesh();
         }

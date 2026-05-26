@@ -377,7 +377,7 @@ MonoBehaviour:
   textureSize: 2048
   radius: 4
   cameraHeight: 20
-  reduceVal: 0.001
+  reduceVal: 0
   edgeSoftness: 25
 --- !u!114 &166511748
 MonoBehaviour:

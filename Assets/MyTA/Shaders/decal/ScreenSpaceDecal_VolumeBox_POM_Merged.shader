@@ -84,6 +84,25 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
         _DiffuseStrength("Diffuse Strength", Range(0, 2)) = 1.0
 
         // ============================================================
+        // Mud Rim / Height-only color
+        // ============================================================
+        // 当高度图的白色凸起泥边超出 Base Alpha 时，用这个颜色补出来。
+        // 否则白色泥边会被 BaseTexture 的黑色透明区域压成黑边，几乎看不见。
+        _MudRimColor("Mud Rim Color", Color) = (0.33, 0.29, 0.16, 1)
+
+        // 凸起泥边颜色混合强度。
+        // 0 = 不额外显示泥边；1~2 = 明显泥边；过高会像描边。
+        _MudRimStrength("Mud Rim Strength", Range(0, 4)) = 1.8
+
+        // 凸起泥边透明度增强。
+        // 让 height > ground 的白色边缘更容易显示出来。
+        _MudRimAlphaBoost("Mud Rim Alpha Boost", Range(0, 4)) = 2.2
+
+        // 高度图有变化但 Base Alpha 很低时使用的兜底泥色。
+        // 解决 height mask 把区域显示出来后，RGB 却仍然采到透明黑的问题。
+        _HeightOnlyColor("Height Only Fallback Color", Color) = (0.24, 0.28, 0.13, 1)
+
+        // ============================================================
         // Alpha / Debug
         // ============================================================
         // Alpha 是否跟随 POM 后的 UV。
@@ -91,9 +110,13 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
         // 1：Alpha 使用 pomUV，视差更明显，但边缘可能锯齿或拉扯。
         _AlphaFromPOM("Alpha From POM 0 Stable 1 POM", Range(0, 1)) = 1
 
+        // 不使用 BaseMap 后，脚印透明度主要来自 HeightTex；
+        // 如果临时不用高度，也可以用 NormalTex 的法线偏离量补 alpha。
+        _NormalAlphaBoost("Normal Alpha Boost", Range(0, 8)) = 2.5
+
         // 调试模式。
         // 0：正常最终效果。
-        // 1：显示 POM depth，越白表示凹陷越深。
+        // 1：显示 POM depth，只显示低于 _HeightGround 的凹陷部分。
         // 2：显示 POM UV offset，方便判断视差偏移是否生效。
         _DebugView("Debug View 0 Final 1 HeightDepth 2 Offset", Range(0, 2)) = 0
     }
@@ -153,6 +176,11 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
             // Screen Space Decal 的核心：用它反推当前屏幕像素对应的世界坐标。
             TEXTURE2D_X_FLOAT(_CameraDepthTexture); SAMPLER(sampler_CameraDepthTexture);
 
+            // 当前相机的不透明颜色拷贝。
+            // 用它拿到地面原本颜色；这样 Decal 不再需要 BaseMap 颜色。
+            // 注意：URP Renderer Asset 里需要开启 Opaque Texture。
+            TEXTURE2D_X(_CameraOpaqueTexture); SAMPLER(sampler_CameraOpaqueTexture);
+
             // ============================================================
             // Parameters from C# / MaterialPropertyBlock
             // ============================================================
@@ -203,7 +231,13 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
             float _DiffuseStrength;
 
             float _AlphaFromPOM;
+            float _NormalAlphaBoost;
             float _DebugView;
+
+            float4 _MudRimColor;
+            float _MudRimStrength;
+            float _MudRimAlphaBoost;
+            float4 _HeightOnlyColor;
 
             struct Attributes
             {
@@ -239,6 +273,11 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
             float SampleRawDepth(float2 screenUV)
             {
                 return SAMPLE_TEXTURE2D_X(_CameraDepthTexture, sampler_CameraDepthTexture, screenUV).r;
+            }
+
+            half3 SampleSceneColor(float2 screenUV)
+            {
+                return SAMPLE_TEXTURE2D_X(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, screenUV).rgb;
             }
 
             // 通过 screenUV + rawDepth + inverse VP 矩阵重建世界坐标。
@@ -313,26 +352,53 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
                 return h;
             }
 
-            // 把 height 值转换成 POM 使用的 depth 值。
-            // depth = 0：没有凹陷。
-            // depth = 1：最深。
-            half SampleDepthForPOM(float2 uv)
+            // 把 height 转换为以 _HeightGround 为 0 点的“有符号高度”。
+            //
+            // 返回值约定：
+            //  0：原始地面，不凹不凸。
+            // <0：低于地面，脚印凹陷。
+            // >0：高于地面，边缘隆起 / 凸起。
+            //
+            // 这里做了两个关键处理：
+            // 1. 以 _HeightGround 为中心，而不是把黑白图当 0~1 单向高度。
+            // 2. 加一个很小的 dead zone，避免 PNG 背景 128/255 不是精确 0.5 时出现整张方形淡痕。
+            half SampleSignedHeightFromGround(float2 uv)
             {
                 half h = SampleHeightRawSafe(uv);
 
-                // 这里整合 BaseHeightNormal_POM 的视差深度算法：
-                // 原测试 shader 中使用的是：
-                // depth = saturate((_HeightCenter - h) * _HeightContrast)
-                //
-                // 当前 decal shader 没有 _HeightCenter，使用已有的 _HeightGround 作为中心高度。
-                // h == _HeightGround：没有凹陷，depth = 0。
-                // h <  _HeightGround：低于地面，depth 增大。
-                // h >  _HeightGround：高于地面，不作为凹陷处理，depth = 0。
-                //
-                // 相比之前的：
-                // ((_HeightGround - h) / _HeightGround) * _HeightContrast * 0.35
-                // 这个版本不会被 0.35 压弱，凹陷会明显更深。
-                return saturate((_HeightGround - h) * _HeightContrast);
+                float belowRange = max(_HeightGround, 0.0001);
+                float aboveRange = max(1.0 - _HeightGround, 0.0001);
+
+                float signedHeight = (h - _HeightGround) / (h < _HeightGround ? belowRange : aboveRange);
+                signedHeight = clamp(signedHeight, -1.0, 1.0);
+
+                // 约 2.5 个 8bit 灰阶的容差。
+                // 你的背景是 0.5，但 PNG 里常见 128/255 = 0.50196，不处理会让背景也参与 alpha / POM。
+                const float deadZone = 0.01;
+                float absHeight = abs(signedHeight);
+                float deadZonedAbs = saturate((absHeight - deadZone) / max(1.0 - deadZone, 0.0001));
+
+                return (half)(sign(signedHeight) * deadZonedAbs);
+            }
+
+            // POM 只应该使用“凹陷”部分。
+            // h < _HeightGround 才产生视差深度；h > _HeightGround 是凸起边缘，不让 POM 把 UV 往坑里拉。
+            half SampleDepthForPOM(float2 uv)
+            {
+                return saturate(-SampleSignedHeightFromGround(uv) * _HeightContrast);
+            }
+
+            // 凸起量，用于颜色 / 明暗增强。
+            half SampleConvexForShading(float2 uv)
+            {
+                return saturate(SampleSignedHeightFromGround(uv) * _HeightContrast);
+            }
+
+            // 高度偏离遮罩。
+            // 用它补充 alpha：即使 Base 贴图 alpha 没覆盖到白色凸起边，也能根据 height 显示出来。
+            half SampleHeightDeviationMask(float2 uv)
+            {
+                return saturate(abs(SampleSignedHeightFromGround(uv)) * _HeightContrast);
             }
 
             // ============================================================
@@ -489,12 +555,10 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
 
                 float2 uvOffset;
                 float2 pomUV = ParallaxOcclusionMapping(decalUV, viewDirTS, uvOffset);
+                float2 finalUV = decalUV;
 
-                // POM UV：用于颜色和 normal，使凹陷产生视差。
-                half4 basePOM = SampleBaseSafe(pomUV);
-
-                // 原始 UV：用于稳定 Alpha 轮廓。
-                half4 baseStable = SampleBaseSafe(decalUV);
+                // 不再采样 BaseMap。
+                // POM UV 只用于 Height / Normal 对齐；颜色直接来自相机不透明颜色，也就是地面本身颜色。
 
                 // ============================================================
                 // 6. Debug
@@ -520,52 +584,61 @@ Shader "Custom/ScreenSpaceDecal_VolumeBox_POM_Merged"
                 // 7. Normal lighting
                 // ============================================================
 
-                // 使用 POM 后的 UV 采样法线，让法线细节和视差位置一致。
-                half4 packedNormal = SampleNormalSafe(pomUV);
+                // 高度：背景 0.5，不显示；小于 0.5 凹陷；大于 0.5 凸起
+                half signedHeight = SampleSignedHeightFromGround(finalUV);
+                half concaveDepth = saturate(-signedHeight * _HeightContrast);
+                half convexHeight = saturate( signedHeight * _HeightContrast);
+
+                // 高度 mask：只要偏离 0.5 就显示
+                half heightMask = saturate(abs(signedHeight) * _HeightContrast);
+
+                // 法线
+                half4 packedNormal = SampleNormalSafe(finalUV);
                 half3 normalTS = UnpackNormalScale(packedNormal, _NormalStrength);
 
-                // tangent space normal -> world space normal。
+                // 法线 mask：平法线 normalTS.xy 接近 0，有凹凸的地方会变大
+                half normalMask = saturate(length(normalTS.xy) * _NormalAlphaBoost);
+
+                // 最终脚印 mask
+                half footprintMask = max(heightMask, normalMask);
+
+                // 很小的区域直接丢弃，避免整块 decal 方片
+                clip(footprintMask - 0.001h);
+
+                // tangent space normal -> world space normal
                 half3 bumpNormalWS = normalize(
                     normalTS.x * tangentWS +
                     normalTS.y * bitangentWS +
                     normalTS.z * decalNormalWS
                 );
 
-                // 只使用 URP 主光做一个轻量的假光照。
+                // ============================================================
+                // 8. 只改地面本身颜色，不使用 BaseMap
+                // ============================================================
+
+                half3 groundRGB = SampleSceneColor(screenUV);
+
+                // 注意：groundRGB 已经是渲染后的地面颜色，不要再乘 ambient + direct。
+                //这里只计算“法线相对原平面”的明暗差。
                 Light mainLight = GetMainLight();
-                half ndotl = saturate(dot(bumpNormalWS, normalize(mainLight.direction)));
+                half3 lightDirWS = normalize(mainLight.direction);
 
-                // 最终 lighting = 环境保底 + 主光漫反射。
-                half lighting = _AmbientStrength + ndotl * _DiffuseStrength;
-                lighting = saturate(lighting);
+                half flatNdotL = saturate(dot(decalNormalWS, lightDirWS));
+                half bumpNdotL = saturate(dot(bumpNormalWS, lightDirWS));
 
-                // ============================================================
-                // 8. Base color + alpha
-                // ============================================================
+                half normalLight = 1.0h + (bumpNdotL - flatNdotL) * _DiffuseStrength;
+                normalLight = lerp(1.0h, normalLight, saturate(_NormalStrength));
 
-                // _UseBaseRGB = 0：baseRGB 为白色，只看 DecalColor 和光照。
-                // _UseBaseRGB = 1：使用贴图 RGB。
-                half3 baseRGB = lerp(half3(1.0h, 1.0h, 1.0h), basePOM.rgb, _UseBaseRGB);
+                // 限制明暗范围，避免脚印变成黑块 / 白块
+                normalLight = clamp(normalLight, 0.82h, 1.18h);
 
-                // 增强脚印纹理对比。
-                // 这一步会让泥土噪声和脚印细节更明显。
-                baseRGB = saturate((baseRGB - 0.03h) * 1.8h);
+                // 高度带来的简单明暗：凹陷略暗，凸起略亮
+                half heightDarken = lerp(1.0h, 0.86h, concaveDepth);
+                half heightLift   = lerp(1.0h, 1.08h, convexHeight);
 
                 half4 color;
-
-                // 根据高度 depth 做额外变暗。
-                // 越深的地方越暗，更像泥地被踩下去。
-                half depthShade = SampleDepthForPOM(pomUV);
-                half heightDarken = lerp(1.0h, 0.62h, depthShade);
-
-                color.rgb = baseRGB * _DecalColor.rgb * lighting * heightDarken;
-
-                // Alpha 可以在“稳定轮廓”和“POM 轮廓”之间插值。
-                // alphaStable：原始 UV，边缘稳定。
-                // alphaPOM：POM UV，视差明显但边缘可能抖动。
-                half alphaStable = baseStable.a;
-                half alphaPOM = basePOM.a;
-                color.a = lerp(alphaStable, alphaPOM, _AlphaFromPOM) * _DecalColor.a;
+                color.rgb = saturate(groundRGB * normalLight * heightDarken * heightLift);
+                color.a = footprintMask * _DecalColor.a;
 
                 // ============================================================
                 // 9. Box Fade / Angle Fade / Distance Fade

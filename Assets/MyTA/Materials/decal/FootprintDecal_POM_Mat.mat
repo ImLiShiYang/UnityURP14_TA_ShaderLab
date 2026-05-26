@@ -21,7 +21,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: FootprintDecal_POM_Mat
-  m_Shader: {fileID: 4800000, guid: a94797399f31fd04386281a902ba98de, type: 3}
+  m_Shader: {fileID: 4800000, guid: 050ac77215f197d4897c07b8e9b878c2, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -124,6 +124,14 @@ Material:
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1
+    - _FlipFootprintNormalY: 0
+    - _FootprintAOSmoothMax: 0.45
+    - _FootprintAOSmoothMin: 0.02
+    - _FootprintAOStrength: 0.28
+    - _FootprintNormalStrength: 1
+    - _FootprintRimLightStrength: 0.08
+    - _FootprintSignedDeadZone: 0.01
+    - _FootprintStrength: 1
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
@@ -131,6 +139,9 @@ Material:
     - _HeightGround: 0.5
     - _InvertHeight: 0
     - _Metallic: 0
+    - _MudRimAlphaBoost: 2.2
+    - _MudRimStrength: 1.8
+    - _NormalAlphaBoost: 2.5
     - _NormalStrength: 1
     - _OcclusionStrength: 1
     - _POMMaxSteps: 64
@@ -153,5 +164,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _DecalColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _HeightOnlyColor: {r: 0.23999995, g: 0.27999997, b: 0.12999997, a: 1}
+    - _MudRimColor: {r: 0.32999998, g: 0.28999996, b: 0.15999997, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
