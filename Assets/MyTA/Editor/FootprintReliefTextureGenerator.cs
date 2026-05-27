@@ -32,9 +32,16 @@ public class FootprintReliefTextureGenerator : EditorWindow
         public const bool PreferAlphaChannel = true;
 
         public const bool GenerateDecalTexture = true;
-        public static readonly Color DecalRgb = new Color(0.34f, 0.37f, 0.25f, 1f);
-        public const float InnerAlpha = 0.5f;
-        public const float SoftEdgePixels = 10.0f;
+        // 沙地 / 浅泥地推荐：暖棕黄，低饱和。
+        // 约等于 RGB(142, 118, 82)。
+        public static readonly Color DecalRgb = new Color(0.56f, 0.46f, 0.32f, 1f);
+
+        // 原来 0.5 太淡，叠加 FootprintSpawner 的 opacity 后会更淡。
+        // 这里提高到 0.85，让贴图本身有足够可见度。
+        public const float InnerAlpha = 0.85f;
+
+        // 边缘稍微更软一点，避免像硬贴纸。
+        public const float SoftEdgePixels = 14.0f;
 
         public const bool GenerateHeightTexture = true;
         public const bool GenerateNormalTexture = true;
@@ -63,7 +70,8 @@ public class FootprintReliefTextureGenerator : EditorWindow
         public const float ArchLiftStrength = 0.16f;
 
         public const float DepressionDepth = 1.0f;
-        public const int ReliefBlurIterations = 6;
+        // 泥边内侧需要“快速下降”，所以默认少模糊一点，避免把陡降抹平。
+        public const int ReliefBlurIterations = 2;
         public const float GeneratedNormalStrength = 5.0f;
         public const bool InvertNormalXY = false;
         public const bool FlipGreenChannel = false;
@@ -73,9 +81,24 @@ public class FootprintReliefTextureGenerator : EditorWindow
         public const float OuterWallWidth = 60f;
         public const float InnerWallWidth = 30f;
 
-        public const float OuterLipWidth = 44f;
-        public const float OuterLipHeight = 0.10f;
-        public const float OuterLipRoundness = 0.98f;
+        // 外侧泥边宽度：从远处原地面 0.5 缓慢升到脚印边界附近最高点。
+        public const float OuterLipWidth = 58f;
+
+        // 泥边峰值高度。最终 HeightTex 大约会把它映射到 0.78~0.86。
+        public const float OuterLipHeight = 0.14f;
+
+        // 外侧缓坡曲线。小于 1 更宽更缓，大于 1 更紧。
+        public const float OuterLipRoundness = 0.85f;
+
+        // 泥边最高点进入脚印内部后的陡降宽度。
+        // 数值越小，越像“脚边一过就掉进坑里”。
+        public const float InnerDropWidth = 13f;
+
+        // 内侧陡降曲线。越大，刚进入脚印内部时下降越快。
+        public const float InnerDropPower = 3.4f;
+
+        // 内侧陡降达到的最低比例。越大，边界内侧越快变深。
+        public const float InnerDropDepthScale = 0.72f;
 
         public const float FrontDepthScale = 1.08f;
         public const float HeelDepthScale = 1.18f;
@@ -149,9 +172,20 @@ public class FootprintReliefTextureGenerator : EditorWindow
     [Tooltip("连续粗泥边高度。")]
     [SerializeField] private float outerLipHeight = DefaultParams.OuterLipHeight;
 
-    [Tooltip("泥边圆滑程度。越大越宽圆，越小越紧。")]
+    [Tooltip("外侧泥边缓坡曲线。小于 1 更宽更缓，大于 1 更紧。")]
     [Range(0.2f, 1.4f)]
     [SerializeField] private float outerLipRoundness = DefaultParams.OuterLipRoundness;
+
+    [Tooltip("泥边最高点进入脚印内部后的陡降宽度。越小，越快掉进脚印坑里。")]
+    [SerializeField] private float innerDropWidth = DefaultParams.InnerDropWidth;
+
+    [Tooltip("内侧陡降曲线。越大，刚进入脚印内部时下降越快。")]
+    [Range(0.8f, 6f)]
+    [SerializeField] private float innerDropPower = DefaultParams.InnerDropPower;
+
+    [Tooltip("内侧陡降达到的最低比例。越大，边界内侧越快变深。")]
+    [Range(0.2f, 1f)]
+    [SerializeField] private float innerDropDepthScale = DefaultParams.InnerDropDepthScale;
 
     [Header("Front / Heel Pressure")]
     [Tooltip("前掌深度系数。")]
@@ -266,9 +300,12 @@ public class FootprintReliefTextureGenerator : EditorWindow
         toeAtTop = EditorGUILayout.Toggle("Toe At Top", toeAtTop);
 
         DrawSectionTitle("Smooth Mud Lip");
-        outerLipWidth = EditorGUILayout.Slider("Outer Lip Width", outerLipWidth, 0f, 80f);
+        outerLipWidth = EditorGUILayout.Slider("Outer Lip Width", outerLipWidth, 0f, 100f);
         outerLipHeight = EditorGUILayout.Slider("Outer Lip Height", outerLipHeight, 0f, 1.8f);
-        outerLipRoundness = EditorGUILayout.Slider("Outer Lip Roundness", outerLipRoundness, 0.2f, 1.4f);
+        outerLipRoundness = EditorGUILayout.Slider("Outer Lip Outer Falloff", outerLipRoundness, 0.2f, 1.4f);
+        innerDropWidth = EditorGUILayout.Slider("Inner Drop Width", innerDropWidth, 1f, 50f);
+        innerDropPower = EditorGUILayout.Slider("Inner Drop Power", innerDropPower, 0.8f, 6f);
+        innerDropDepthScale = EditorGUILayout.Slider("Inner Drop Depth Scale", innerDropDepthScale, 0.2f, 1f);
 
         DrawSectionTitle("Front / Heel Pressure");
         frontDepthScale = EditorGUILayout.Slider("Front Depth Scale", frontDepthScale, 0.2f, 2f);
@@ -354,6 +391,9 @@ public class FootprintReliefTextureGenerator : EditorWindow
         outerLipWidth = DefaultParams.OuterLipWidth;
         outerLipHeight = DefaultParams.OuterLipHeight;
         outerLipRoundness = DefaultParams.OuterLipRoundness;
+        innerDropWidth = DefaultParams.InnerDropWidth;
+        innerDropPower = DefaultParams.InnerDropPower;
+        innerDropDepthScale = DefaultParams.InnerDropDepthScale;
 
         frontDepthScale = DefaultParams.FrontDepthScale;
         heelDepthScale = DefaultParams.HeelDepthScale;
@@ -708,9 +748,18 @@ public class FootprintReliefTextureGenerator : EditorWindow
         float depth = Mathf.Max(0f, depressionDepth);
         float safeOuterWall = Mathf.Max(0.001f, outerWallWidth);
         float safeInnerWall = Mathf.Max(0.001f, innerWallWidth);
+
         float lipWidth = Mathf.Max(0.001f, outerLipWidth);
         float lipHeight = Mathf.Max(0f, outerLipHeight);
-        float lipRoundness = Mathf.Max(0.2f, outerLipRoundness);
+
+        // outerLipRoundness 现在控制“从外侧地面缓慢升到泥边最高点”的曲线。
+        // < 1：外侧更宽更缓；> 1：更集中在脚印边缘附近。
+        float outerFalloffPower = Mathf.Max(0.2f, outerLipRoundness);
+
+        // 内侧陡降参数：泥边最高点一过脚印边界，就快速跌到凹陷。
+        float dropWidth = Mathf.Max(0.001f, innerDropWidth);
+        float dropPower = Mathf.Max(0.8f, innerDropPower);
+        float dropDepthScale = Mathf.Clamp01(innerDropDepthScale);
 
         // 找出脚印内部最大距离，用来把“离边缘距离”归一化成 0~1。
         // 这个值是内部碗形凹陷的基础：边缘浅，越靠中心越深。
@@ -733,7 +782,6 @@ public class FootprintReliefTextureGenerator : EditorWindow
             float heel01 = 1f - toe01;
 
             // 压力分布：前掌和脚跟更深，脚心略浅。
-            // 注意这里不要直接让 pressure 变成横向色带；后面会乘以 bowl01，形成连续内部坡度。
             float heelPatch = Gaussian01(toe01, 0.17f, 0.18f) * heelDepthScale;
             float forePatch = Gaussian01(toe01, 0.76f, 0.20f) * frontDepthScale;
             float archPatch = Gaussian01(toe01, 0.48f, 0.18f);
@@ -750,29 +798,38 @@ public class FootprintReliefTextureGenerator : EditorWindow
                 float innerSide01 = Smoother01(GetInnerSide01(maskData, x));
                 float outerSide01 = 1f - innerSide01;
 
+                // 外侧略高、脚跟略高，模拟泥被脚往外挤。
+                float sideBias = 1f + 0.08f * outerSide01 - 0.04f * innerSide01;
+                float heelBias = 1f + 0.06f * heel01;
+                float rimPeakHeight = lipHeight * sideBias * heelBias;
+
                 if (maskData.mask[i])
                 {
-                    float localWallWidth = safeOuterWall * outerSide01 + safeInnerWall * innerSide01;
                     float dIn = distanceData.distanceToOutside[i];
 
-                    // 坑壁坡度：边缘 0，进入脚印内部后逐渐到 1。
-                    // 它负责边缘软过渡。
-                    float wall01 = Smoother01(Mathf.Clamp01(dIn / localWallWidth));
+                    // ---------------------------------------------------------
+                    // 正确剖面：
+                    // 外侧远处原始地面 0.5
+                    // -> 靠近脚印边界时升高到泥边峰值
+                    // -> 一进入脚印内部，快速下降到凹陷
+                    //
+                    // 这里的 inside 分支负责“泥边峰值 -> 内侧极速下降 -> 内部凹陷”。
+                    // dIn = 0 时，认为仍在泥边峰值附近。
+                    // dIn 增大到 innerDropWidth 时，已经快速掉进脚印坑里。
+                    // ---------------------------------------------------------
 
-                    // 内部碗形：基于“离边缘距离 / 内部最大距离”。
-                    // 边缘浅，越靠内部越深；power < 1 会让凹陷更宽、更柔。
+                    float localWallWidth = safeOuterWall * outerSide01 + safeInnerWall * innerSide01;
+
+                    // 保留旧的内部连续碗形，用于脚印更深处的层次。
+                    float wall01 = Smoother01(Mathf.Clamp01(dIn / localWallWidth));
                     float center01 = Smoother01(Mathf.Clamp01(dIn / maxInsideDistance));
                     float bowl01 = Mathf.Pow(center01, bowlPower);
-
-                    // 轻微脚心回弹：让脚心区域比前掌/脚跟浅一些。
                     float archLift01 = archPatch * archLift;
 
                     float depthScale;
 
                     if (flatInterior)
                     {
-                        // 仍允许 FlatInterior，但不再强制死平：
-                        // 基础是统一深度，叠加少量 bowl，让内部也能有一点凹陷坡度。
                         if (keepHeelDepthDifferenceWhenFlat)
                         {
                             float heelBlend = Smoother01(heel01);
@@ -788,8 +845,6 @@ public class FootprintReliefTextureGenerator : EditorWindow
                     }
                     else
                     {
-                        // 非平底模式：真正的内部碗形凹陷。
-                        // pressure 决定前掌/脚跟更深，bowl01 决定从边缘到内部的连续坡度。
                         depthScale = wholeSoleInfluence;
                         depthScale += bowl01 * bowlStrength;
                         depthScale += pressure;
@@ -797,6 +852,19 @@ public class FootprintReliefTextureGenerator : EditorWindow
                     }
 
                     depthScale = Mathf.Clamp01(depthScale);
+
+                    // 内侧极速下降 mask。
+                    // drop01 = 0：刚在边界内侧，还是泥边最高。
+                    // drop01 = 1：已经掉进脚印坑里。
+                    float inner01 = Mathf.Clamp01(dIn / dropWidth);
+                    float drop01 = 1f - Mathf.Pow(1f - inner01, dropPower);
+
+                    // 脚印坑底目标高度。
+                    // Max(wall01, drop01 * dropDepthScale) 的作用：
+                    // - 旧 wall01 让内部继续有碗形层次。
+                    // - drop01 * dropDepthScale 让边界内侧快速跌下去，不再慢慢过渡。
+                    float depressionShape01 = Mathf.Max(wall01, drop01 * dropDepthScale);
+                    float targetInsideRelief = -depth * depthScale * depressionShape01;
 
                     float noise = 0f;
                     if (addGeneratedNoise && interiorNoiseStrength > 0f)
@@ -807,14 +875,19 @@ public class FootprintReliefTextureGenerator : EditorWindow
                         noise = (n1 * 0.72f + n2 * 0.28f) * interiorNoiseStrength * noiseFade;
                     }
 
-                    // 最终内部高度：
-                    // wall01 控制边缘软坡，depthScale + bowl01 控制内部不是平底。
-                    relief[i] = -depth * depthScale * wall01 + noise;
+                    // 从“泥边最高点”快速 lerp 到“内部凹陷”。
+                    relief[i] = Mathf.Lerp(rimPeakHeight, targetInsideRelief + noise, drop01);
                 }
                 else
                 {
-                    // 外部泥边 / 隆起。
-                    // 只在脚印外侧 lipWidth 范围内产生正高度。
+                    // ---------------------------------------------------------
+                    // 外侧泥边：
+                    // 从外侧远处往脚印走：
+                    // 原始地面 0.5 -> 慢慢升高 -> 到达泥边最高点。
+                    //
+                    // 这里的 outside 分支只做“外侧缓坡”，不再使用中间高峰 Gaussian，
+                    // 最高点固定贴近脚印边界。
+                    // ---------------------------------------------------------
                     float dOut = distanceData.distanceToInside[i];
                     if (dOut >= lipWidth)
                     {
@@ -822,23 +895,16 @@ public class FootprintReliefTextureGenerator : EditorWindow
                         continue;
                     }
 
-                    float t = Mathf.Clamp01(dOut / lipWidth);
+                    // outer01：
+                    // 0 = 泥边影响范围外，回到原始地面。
+                    // 1 = 贴近脚印边界，达到泥边最高。
+                    float outer01 = 1f - Mathf.Clamp01(dOut / lipWidth);
+                    outer01 = Smoother01(outer01);
 
-                    // 宽而低的圆润泥边，不做尖锐高峰。
-                    float shoulder = Mathf.Pow(1f - t, lipRoundness);
-                    float peakCenter = 0.42f;
-                    float peakWidth = 0.34f + (1.0f - lipRoundness) * 0.08f;
-                    float peak = Mathf.Exp(-0.5f * Mathf.Pow((t - peakCenter) / Mathf.Max(0.001f, peakWidth), 2f));
-                    float outFade = Smoother01(1f - t);
-                    float edgeFade = Mathf.Lerp(0.45f, 1f, Smoother01(Mathf.Clamp01(t / 0.24f)));
+                    // 外侧是缓慢回落，所以这里不用尖峰，只做单调衰减。
+                    float rim = rimPeakHeight * Mathf.Pow(outer01, outerFalloffPower);
 
-                    float rim = lipHeight * (0.36f * shoulder + 0.70f * peak) * outFade * edgeFade;
-
-                    // 外侧泥边略强，脚跟略强，模拟被脚挤出去的泥。
-                    float sideBias = 1f + 0.08f * outerSide01 - 0.04f * innerSide01;
-                    float heelBias = 1f + 0.06f * heel01;
-
-                    relief[i] = Mathf.Max(0f, rim * sideBias * heelBias);
+                    relief[i] = Mathf.Max(0f, rim);
                 }
             }
         }
@@ -846,72 +912,139 @@ public class FootprintReliefTextureGenerator : EditorWindow
         return relief;
     }
 
-    private Texture2D CreateGeneratedDecalTexture(MaskData maskData, DistanceData distanceData, float[] relief, int width, int height)
+    private Texture2D CreateGeneratedDecalTexture(
+    MaskData maskData,
+    DistanceData distanceData,
+    float[] relief,
+    int width,
+    int height)
+{
+    Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
+    Color[] colors = new Color[width * height];
+
+    float safeSoftEdge = Mathf.Max(0.001f, softEdgePixels);
+    float maxDown = Mathf.Max(0.0001f, depressionDepth * Mathf.Max(frontDepthScale, heelDepthScale));
+    float maxUp = Mathf.Max(0.0001f, outerLipHeight * 1.45f);
+
+    // decalRgb 现在作为“基础沙土脚印色”。
+    // 推荐默认值：RGB(142,118,82)，也就是 Color(0.56, 0.46, 0.32)。
+    Color baseSandFootprint = decalRgb;
+
+    // 内部最深处：比基础色更暗、更接近被踩湿/压实的沙土。
+    Color deepPressedColor = new Color(
+        Mathf.Clamp01(baseSandFootprint.r * 0.78f),
+        Mathf.Clamp01(baseSandFootprint.g * 0.72f),
+        Mathf.Clamp01(baseSandFootprint.b * 0.62f),
+        1f
+    );
+
+    // 内部边缘：比中心浅一点，接近地面颜色，避免一圈硬边。
+    Color softEdgeColor = new Color(
+        Mathf.Clamp01(baseSandFootprint.r * 1.16f),
+        Mathf.Clamp01(baseSandFootprint.g * 1.12f),
+        Mathf.Clamp01(baseSandFootprint.b * 1.02f),
+        1f
+    );
+
+    // 外部被挤起的沙边 / 泥边：只能略亮，不能变成白色描边。
+    Color lipColor = new Color(
+        Mathf.Clamp01(baseSandFootprint.r * 1.22f),
+        Mathf.Clamp01(baseSandFootprint.g * 1.16f),
+        Mathf.Clamp01(baseSandFootprint.b * 1.02f),
+        1f
+    );
+
+    for (int y = 0; y < height; y++)
     {
-        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
-        Color[] colors = new Color[width * height];
+        float toe01 = GetToeAxis01(maskData, y);
+        float heel01 = 1f - toe01;
 
-        float safeSoftEdge = Mathf.Max(0.001f, softEdgePixels);
-        float maxDown = Mathf.Max(0.0001f, depressionDepth * Mathf.Max(frontDepthScale, heelDepthScale));
-        float maxUp = Mathf.Max(0.0001f, outerLipHeight * 1.8f);
+        // 脚跟和前掌可以略深；脚心相对浅一点。
+        float heelPressure = Gaussian01(toe01, 0.17f, 0.20f);
+        float forePressure = Gaussian01(toe01, 0.76f, 0.22f);
+        float pressure01 = Mathf.Clamp01(heelPressure * 0.55f + forePressure * 0.45f);
 
-        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
         {
-            float toe01 = GetToeAxis01(maskData, y);
-            float heel01 = 1f - toe01;
+            int i = y * width + x;
+            bool inside = maskData.mask[i];
 
-            for (int x = 0; x < width; x++)
+            float depression01 = Mathf.Clamp01(-relief[i] / maxDown);
+            float lip01 = Mathf.Clamp01(relief[i] / maxUp);
+
+            // 完全没有脚印影响的地方保持透明。
+            if (!inside && lip01 <= 0.001f)
             {
-                int i = y * width + x;
-                bool inside = maskData.mask[i];
-
-                float depression01 = Mathf.Clamp01(-relief[i] / maxDown);
-                float lip01 = Mathf.Clamp01(relief[i] / maxUp);
-
-                if (!inside && lip01 <= 0.001f)
-                {
-                    colors[i] = new Color(0f, 0f, 0f, 0f);
-                    continue;
-                }
-
-                float alpha;
-                float shade = 1f;
-
-                if (inside)
-                {
-                    float d = distanceData.distanceToOutside[i];
-                    float a = Smoother01(Mathf.Clamp01(d / safeSoftEdge));
-                    alpha = Mathf.Lerp(0f, innerAlpha, a);
-                    shade -= depression01 * 0.22f;
-                    shade -= heel01 * depression01 * 0.06f;
-                }
-                else
-                {
-                    alpha = lip01 * innerAlpha * 0.78f;
-                    shade += lip01 * 0.08f;
-                }
-
-                if (addGeneratedNoise)
-                {
-                    float n = SignedNoise(x / 42f, y / 42f, 101);
-                    shade += n * 0.018f;
-                }
-
-                shade = Mathf.Clamp(shade, 0.48f, 1.12f);
-
-                Color c = decalRgb;
-                c.r = Mathf.Clamp01(c.r * shade);
-                c.g = Mathf.Clamp01(c.g * shade);
-                c.b = Mathf.Clamp01(c.b * shade);
-                c.a = Mathf.Clamp01(alpha);
-                colors[i] = c;
+                colors[i] = new Color(0f, 0f, 0f, 0f);
+                continue;
             }
-        }
 
-        texture.SetPixels(colors);
-        texture.Apply(false, false);
-        return texture;
+            float alpha;
+            Color c;
+
+            if (inside)
+            {
+                float d = distanceData.distanceToOutside[i];
+
+                // 0 = 非常靠近脚印边缘
+                // 1 = 已经进入脚印内部
+                float edgeFade01 = Smoother01(Mathf.Clamp01(d / safeSoftEdge));
+
+                // 颜色混合：
+                // 边缘使用 softEdgeColor，越深越往 deepPressedColor 过渡。
+                float deepMix = Mathf.Clamp01(depression01 * 0.85f + pressure01 * 0.25f);
+                c = Color.Lerp(softEdgeColor, deepPressedColor, deepMix);
+
+                // 脚跟略微更暗一点，但不要太重。
+                float heelDarken = 1f - heel01 * depression01 * 0.08f;
+                c.r *= heelDarken;
+                c.g *= heelDarken;
+                c.b *= heelDarken;
+
+                // Alpha：
+                // 边缘从 0 柔和进入；
+                // 内部根据凹陷强度提高不透明度。
+                float innerAlphaBoost = Mathf.Lerp(0.68f, 1.0f, Mathf.Clamp01(depression01 * 0.9f + pressure01 * 0.25f));
+                alpha = innerAlpha * edgeFade01 * innerAlphaBoost;
+
+                // 新的高度剖面里，脚印边界内侧也可能仍是正高度泥边峰值。
+                // 如果继续完全依赖 edgeFade01，最高泥边会被 alpha 裁掉。
+                // 所以正高度区域额外用 lip01 保底，但仍保持半透明，避免变成硬描边。
+                if (lip01 > 0.001f)
+                {
+                    c = Color.Lerp(c, lipColor, lip01 * 0.55f);
+                    alpha = Mathf.Max(alpha, lip01 * innerAlpha * 0.62f);
+                }
+            }
+            else
+            {
+                // 外圈沙边 / 泥边：
+                // 只给一点颜色和透明度，不要形成明显白色描边。
+                c = Color.Lerp(baseSandFootprint, lipColor, lip01 * 0.45f);
+
+                // 外部凸起边的 alpha 低一些，避免像描边。
+                alpha = lip01 * innerAlpha * 0.36f;
+            }
+
+            // 很轻微的颜色扰动，让脚印不要像纯色贴纸。
+            // 即使 AddGeneratedNoise 关闭，也给 decal 颜色一点点低频变化。
+            float n1 = SignedNoise(x / 64f, y / 64f, 501);
+            float n2 = SignedNoise(x / 28f, y / 28f, 733);
+            float colorNoise = n1 * 0.018f + n2 * 0.008f;
+
+            c.r = Mathf.Clamp01(c.r + colorNoise);
+            c.g = Mathf.Clamp01(c.g + colorNoise);
+            c.b = Mathf.Clamp01(c.b + colorNoise);
+
+            c.a = Mathf.Clamp01(alpha);
+            colors[i] = c;
+        }
     }
+
+    texture.SetPixels(colors);
+    texture.Apply(false, false);
+    return texture;
+}
 
     private Texture2D CreateHeightTexture(float[] relief, int width, int height)
     {
@@ -919,7 +1052,7 @@ public class FootprintReliefTextureGenerator : EditorWindow
         Color[] colors = new Color[width * height];
 
         float maxDown = Mathf.Max(0.0001f, depressionDepth * Mathf.Max(frontDepthScale, heelDepthScale));
-        float maxUp = Mathf.Max(0.0001f, outerLipHeight * 1.8f);
+        float maxUp = Mathf.Max(0.0001f, outerLipHeight * 1.45f);
         float maxAbs = Mathf.Max(maxDown, maxUp);
 
         for (int i = 0; i < colors.Length; i++)

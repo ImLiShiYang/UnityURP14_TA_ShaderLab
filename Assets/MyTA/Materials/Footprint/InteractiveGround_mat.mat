@@ -132,11 +132,11 @@ Material:
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.40000004, g: 0.5294118, b: 0.33333334, a: 1}
+    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FootprintColor: {r: 1, g: 1, b: 1, a: 1}
-    - _FootstepRect: {r: 9.818594, g: 28.824158, b: 17.818594, a: 36.824158}
+    - _FootstepRect: {r: -7.61125, g: 23.30853, b: 0.38875008, a: 31.30853}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &1596812280583404679

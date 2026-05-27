@@ -107,7 +107,7 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
-    - _AlphaFromPOM: 0.5
+    - _AlphaFromPOM: 0
     - _AlphaToMask: 0
     - _AmbientStrength: 0.25
     - _Blend: 0
@@ -115,6 +115,9 @@ Material:
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
+    - _ConcavePOMStrength: 1
+    - _ConvexPOMSteps: 16
+    - _ConvexPOMStrength: 0.7
     - _Cull: 2
     - _Cutoff: 0.5
     - _DebugView: 0
@@ -129,7 +132,7 @@ Material:
     - _FootprintAOSmoothMin: 0.02
     - _FootprintAOStrength: 0.28
     - _FootprintNormalStrength: 1
-    - _FootprintRimLightStrength: 0.08
+    - _FootprintRimLightStrength: 0.384
     - _FootprintSignedDeadZone: 0.01
     - _FootprintStrength: 1
     - _GlossMapScale: 0
@@ -142,6 +145,7 @@ Material:
     - _MudRimAlphaBoost: 2.2
     - _MudRimStrength: 1.8
     - _NormalAlphaBoost: 2.5
+    - _NormalLightStrength: 0.8
     - _NormalStrength: 1
     - _OcclusionStrength: 1
     - _POMMaxSteps: 64
