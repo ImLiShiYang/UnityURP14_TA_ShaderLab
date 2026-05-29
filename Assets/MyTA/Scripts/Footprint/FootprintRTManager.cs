@@ -482,10 +482,7 @@ public class FootprintRTManager : MonoBehaviour
         Vector3 center = target.position;
         float diameter = radius * 2f;
 
-        Vector2 uvOffset = new Vector2(
-            (lastCenter.x - center.x) / diameter,
-            (lastCenter.z - center.z) / diameter
-        );
+        Vector2 uvOffset = new Vector2((lastCenter.x - center.x) / diameter,(lastCenter.z - center.z) / diameter);
 
         float texel = 1f / textureSize;
 
@@ -517,12 +514,12 @@ public class FootprintRTManager : MonoBehaviour
         
         appliedOffsetThisFrame = GetCurrentOffset();
 
-        Debug.Log(
-            $"[SetupAccumulate] " +
-            $"target=({target.position.x:F4}, {target.position.y:F4}, {target.position.z:F4}), " +
-            $"lastCenter=({lastCenter.x:F4}, {lastCenter.y:F4}, {lastCenter.z:F4}), " +
-            $"offset=({appliedOffsetThisFrame.x:F6}, {appliedOffsetThisFrame.y:F6})"
-        );
+        // Debug.Log(
+        //     $"[SetupAccumulate] " +
+        //     $"target=({target.position.x:F4}, {target.position.y:F4}, {target.position.z:F4}), " +
+        //     $"lastCenter=({lastCenter.x:F4}, {lastCenter.y:F4}, {lastCenter.z:F4}), " +
+        //     $"offset=({appliedOffsetThisFrame.x:F6}, {appliedOffsetThisFrame.y:F6})"
+        // );
 
         accumulateMaterial.SetTexture(LastTexID, accumA);
         accumulateMaterial.SetVector(OffsetID, appliedOffsetThisFrame);

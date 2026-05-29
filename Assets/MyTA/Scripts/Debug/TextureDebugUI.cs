@@ -13,7 +13,18 @@ public class TextureDebugUI : MonoBehaviour
         B = 4,
         NormalDiff = 5,
         NormalEncoded = 6,
-        RGBWithAlphaBackground = 7
+        RGBWithAlphaBackground = 7,
+
+        // Snow RT 调试模式。
+        // 当前雪地 RT 协议：
+        // R = sink，下陷深度。
+        // G = rim，雪边凸起，第一阶段可以不用。
+        // B = 预留。
+        // A = mask，brush 覆盖范围。
+        SnowSinkR = 8,
+        SnowRimG = 9,
+        SnowMaskA = 10,
+        SnowComposite = 11
     }
 
     public enum Corner
@@ -125,14 +136,16 @@ public class TextureDebugUI : MonoBehaviour
 
     public void NextMode()
     {
-        int next = ((int)mode + 1) % 8;
+        int count = System.Enum.GetValues(typeof(DebugMode)).Length;
+        int next = ((int)mode + 1) % count;
         mode = (DebugMode)next;
         ApplyAll();
     }
 
     public void PreviousMode()
     {
-        int prev = ((int)mode - 1 + 8) % 8;
+        int count = System.Enum.GetValues(typeof(DebugMode)).Length;
+        int prev = ((int)mode - 1 + count) % count;
         mode = (DebugMode)prev;
         ApplyAll();
     }

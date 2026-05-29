@@ -10,27 +10,36 @@ using UnityEngine;
 /// - SpawnRightFootprint()
 ///
 /// 然后这个脚本可以同时转发给：
-/// 1. Decal 脚印系统
-/// 2. RT Brush 脚印系统
+/// 1. 旧 Decal 脚印系统
+/// 2. 旧 RT Brush 脚印系统
+/// 3. 新 Snow RT Brush 雪地压痕系统
 ///
-/// 这样你不需要给 Decal 和 RT 分别写两套 Animation Event。
+/// 这样动画里仍然只需要保留一套 Animation Event。
 /// </summary>
 public class FootstepEventReceiver : MonoBehaviour
 {
     [Header("Decal Footprint")]
-    [Tooltip("是否把动画事件转发给 Decal 脚印系统。")]
+    [Tooltip("是否把动画事件转发给旧 Decal 脚印系统。")]
     public bool enableDecalFootprint = true;
 
     [Tooltip("旧的 Decal 脚印生成器。")]
     public FootprintDecalSpawner decalSpawner;
 
 
-    [Header("RT Brush Footprint")]
-    [Tooltip("是否把动画事件转发给 RT Brush 脚印系统。")]
+    [Header("Old RT Brush Footprint")]
+    [Tooltip("是否把动画事件转发给旧 RT Brush 脚印系统。")]
     public bool enableRTFootprint = true;
 
-    [Tooltip("新的 RT Brush 脚印生成器。")]
+    [Tooltip("旧的 RT Brush 脚印生成器。")]
     public FootprintBrushSpawner brushSpawner;
+
+
+    [Header("Snow RT Brush Footprint")]
+    [Tooltip("是否把动画事件转发给新 Snow RT Brush 雪地压痕系统。")]
+    public bool enableSnowFootprint = true;
+
+    [Tooltip("新的 Snow RT Brush 雪地压痕生成器。")]
+    public SnowFootprintBrushSpawner snowBrushSpawner;
 
 
     [Header("Debug")]
@@ -39,21 +48,24 @@ public class FootstepEventReceiver : MonoBehaviour
 
     private void Awake()
     {
-        // 自动从父物体查找 Decal 生成器。
         if (decalSpawner == null)
         {
             decalSpawner = GetComponentInParent<FootprintDecalSpawner>();
         }
 
-        // 自动从父物体查找 RT Brush 生成器。
         if (brushSpawner == null)
         {
             brushSpawner = GetComponentInParent<FootprintBrushSpawner>();
         }
+
+        if (snowBrushSpawner == null)
+        {
+            snowBrushSpawner = GetComponentInParent<SnowFootprintBrushSpawner>();
+        }
     }
 
     /// <summary>
-    /// 动画事件调用：左脚落地。
+    /// Animation Event 调用：左脚落地。
     /// </summary>
     public void SpawnLeftFootprint()
     {
@@ -71,10 +83,15 @@ public class FootstepEventReceiver : MonoBehaviour
         {
             brushSpawner.SpawnLeftFootprint();
         }
+
+        if (enableSnowFootprint && snowBrushSpawner != null)
+        {
+            snowBrushSpawner.SpawnLeftFootprint();
+        }
     }
 
     /// <summary>
-    /// 动画事件调用：右脚落地。
+    /// Animation Event 调用：右脚落地。
     /// </summary>
     public void SpawnRightFootprint()
     {
@@ -91,6 +108,11 @@ public class FootstepEventReceiver : MonoBehaviour
         if (enableRTFootprint && brushSpawner != null)
         {
             brushSpawner.SpawnRightFootprint();
+        }
+
+        if (enableSnowFootprint && snowBrushSpawner != null)
+        {
+            snowBrushSpawner.SpawnRightFootprint();
         }
     }
 }

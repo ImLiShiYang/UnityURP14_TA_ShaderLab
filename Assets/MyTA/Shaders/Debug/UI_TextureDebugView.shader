@@ -4,14 +4,18 @@ Shader "Debug/UI_TextureDebugView"
     {
         _MainTex ("Texture", 2D) = "black" {}
 
-        // 0 RGB
-        // 1 Alpha
-        // 2 R
-        // 3 G
-        // 4 B
-        // 5 NormalDiff
-        // 6 NormalEncoded
-        // 7 RGBWithAlphaBackground
+        // 0  RGB
+        // 1  Alpha
+        // 2  R
+        // 3  G
+        // 4  B
+        // 5  NormalDiff
+        // 6  NormalEncoded
+        // 7  RGBWithAlphaBackground
+        // 8  SnowSinkR
+        // 9  SnowRimG
+        // 10 SnowMaskA
+        // 11 SnowComposite
         _Mode ("Mode", Float) = 0
 
         _Exposure ("Exposure", Range(0, 10)) = 1
@@ -89,61 +93,80 @@ Shader "Debug/UI_TextureDebugView"
             half4 Frag(Varyings IN) : SV_Target
             {
                 half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, IN.uv);
-                
-                
-                
-                // RGB
+
+                // 0. RGB：普通彩色查看。
                 if (_Mode < 0.5)
                     return half4(saturate(col.rgb * _Exposure), 1);
 
-                // Alpha
+                // 1. Alpha：查看 A 通道。
                 if (_Mode < 1.5)
-                {
-                    // half a = col.a;
-                    // // return half4(saturate(a * 50.0h).xxx, 1);
-                    //
-                    // half visible = step(0.005h, a);
-                    // return half4(visible.xxx, 1);
-                    
                     return half4(saturate(col.aaa * _Exposure), 1);
-                }
-                    
 
-                // R
+                // 2. R：旧系统可看 R，新雪地系统中 R = sink 下陷深度。
                 if (_Mode < 2.5)
                     return half4(saturate(col.rrr * _Exposure), 1);
 
-                // G
+                // 3. G：旧系统可看 G，新雪地系统中 G = rim 雪边凸起。
                 if (_Mode < 3.5)
                     return half4(saturate(col.ggg * _Exposure), 1);
 
-                // B
+                // 4. B：旧系统可看 B，新雪地系统暂时预留。
                 if (_Mode < 4.5)
                     return half4(saturate(col.bbb * _Exposure), 1);
 
-                // NormalDiff：看法线相对默认法线的变化
-                // NormalDiff：只看 alpha 有效区域
+                // 5. NormalDiff：旧法线 RT 调试用。
+                // 新雪地 RT 是黑底数据图，不建议用这个模式判断雪下陷。
                 if (_Mode < 5.5)
                 {
                     half3 neutral = half3(0.5h, 0.5h, 1.0h);
                     half3 diff = abs(col.rgb - neutral) * _NormalDiffStrength;
-
                     half mask = step(0.001h, col.a);
-
-                    return half4(saturate(diff)*mask, 1);
+                    return half4(saturate(diff) * mask, 1);
                 }
 
-                // NormalEncoded：把 RGB 当 normalRGB 解码再编码显示
+                // 6. NormalEncoded：旧法线 RT 调试用。
                 if (_Mode < 6.5)
                 {
                     half3 n = normalize(col.rgb * 2.0h - 1.0h);
                     return half4(n * 0.5h + 0.5h, 1);
-                    // return half4(n,1);
                 }
 
-                // RGB + Alpha 背景
-                half3 rgbOnBg = lerp(_BackgroundColor.rgb, col.rgb, col.a);
-                return half4(saturate(rgbOnBg * _Exposure), 1);
+                // 7. RGB + Alpha 背景：适合旧脚印 RT 看 alpha 覆盖区。
+                if (_Mode < 7.5)
+                {
+                    half3 rgbOnBg = lerp(_BackgroundColor.rgb, col.rgb, col.a);
+                    return half4(saturate(rgbOnBg * _Exposure), 1);
+                }
+
+                // 8. SnowSinkR：雪地下陷强度。黑=无下陷，白=最大下陷。
+                if (_Mode < 8.5)
+                {
+                    half sink = saturate(col.r * _Exposure);
+                    return half4(sink.xxx, 1);
+                }
+
+                // 9. SnowRimG：雪边凸起强度。第一阶段通常应该全黑或很弱。
+                if (_Mode < 9.5)
+                {
+                    half rim = saturate(col.g * _Exposure);
+                    return half4(rim.xxx, 1);
+                }
+
+                // 10. SnowMaskA：Brush 覆盖 mask。黑=无 brush，白=有 brush。
+                if (_Mode < 10.5)
+                {
+                    half mask = saturate(col.a * _Exposure);
+                    return half4(mask.xxx, 1);
+                }
+
+                // 11. SnowComposite：雪地专用合成调试。
+                // R 通道显示下陷，G 通道显示雪边，B 通道显示 mask，方便一眼看数据是否串通道。
+                half sinkC = saturate(col.r * _Exposure);
+                half rimC = saturate(col.g * _Exposure);
+                half maskC = saturate(col.a * _Exposure);
+                half3 composite = half3(sinkC, rimC, maskC);
+                composite = lerp(_BackgroundColor.rgb, composite, saturate(max(max(sinkC, rimC), maskC)));
+                return half4(composite, 1);
             }
 
             ENDHLSL

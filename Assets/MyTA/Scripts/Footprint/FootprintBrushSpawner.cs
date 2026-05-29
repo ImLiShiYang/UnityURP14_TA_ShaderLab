@@ -334,17 +334,23 @@ public class FootprintBrushSpawner : MonoBehaviour
     // Unity Events
     // ============================================================
 
+    // [说明] Awake 只做“引用自动补齐”，避免在 Inspector 漏绑时脚印系统直接失效。
+    // [说明] 这里不会生成脚印，也不会写 RT，只是在运行开始前准备角色、动画器、脚骨骼等依赖。
     private void Awake()
     {
+        // [说明] characterRoot 用来代表角色整体位置和朝向；如果没手动绑定，就默认使用当前脚本所在物体。
         if (characterRoot == null)
             characterRoot = transform;
 
+        // [说明] Animator 主要用于两件事：读取 Humanoid 脚骨骼，以及读取 MoveSpeed 判断是否真的在移动。
         if (animator == null)
             animator = GetComponentInChildren<Animator>();
 
+        // [说明] playerController 用来读取 HasMoveInput，防止角色停止时动画事件残留继续生成脚印。
         if (playerController == null)
             playerController = GetComponentInParent<ThirdPersonPlayerController>();
 
+        // [说明] 如果角色是 Humanoid，并且 Inspector 没手动指定脚骨骼，就从 Animator 自动拿 Foot / Toes。
         if (animator != null)
         {
             if (leftFoot == null)
@@ -361,33 +367,56 @@ public class FootprintBrushSpawner : MonoBehaviour
         }
     }
 
+    // [说明] Start 记录距离生成模式的起点位置。
+    // [说明] 后续 Update 会拿当前角色位置和 lastStepPos 比较，判断是否走够 stepDistance。
     private void Start()
     {
         if (characterRoot != null)
             lastStepPos = characterRoot.position;
     }
 
+    // [说明] Update 只负责“距离生成模式”。
+    // [说明] 如果 useDistanceSpawn=false，脚印应该由 Animation Event 调用 SpawnLeftFootprint / SpawnRightFootprint 生成。
     private void Update()
     {
-        if (!useDistanceSpawn)
-            return;
+        // [说明] useDistanceSpawn=true 时，不依赖动画事件，而是按角色移动距离自动交替生成左右脚脚印。
+        if (useDistanceSpawn)
+        {
+            // [说明] 距离模式至少需要角色根节点和 Brush prefab。
+            // [说明] 缺任何一个都无法计算移动距离或实例化脚印 Brush。
+            if (characterRoot == null || brushPrefab == null)
+                return;
 
-        if (characterRoot == null || brushPrefab == null)
-            return;
+            // [说明] 只比较 XZ 平面距离，忽略 Y 轴高度。
+            // [说明] 这样角色上下坡、地面高低变化时，不会因为高度变化误判为走了一步。
+            Vector3 flatNow = new Vector3(characterRoot.position.x, 0f, characterRoot.position.z);
+            Vector3 flatLast = new Vector3(lastStepPos.x, 0f, lastStepPos.z);
 
-        Vector3 flatNow = new Vector3(characterRoot.position.x, 0f, characterRoot.position.z);
-        Vector3 flatLast = new Vector3(lastStepPos.x, 0f, lastStepPos.z);
+            // [说明] 没有走够 stepDistance 就不生成脚印。
+            // [说明] 这个判断相当于一个简单的“步频模拟器”。
+            if (Vector3.Distance(flatNow, flatLast) < stepDistance)
+                return;
 
-        if (Vector3.Distance(flatNow, flatLast) < stepDistance)
-            return;
+            // [说明] 走够一步后，根据 nextLeftFoot 决定生成左脚还是右脚。
+            // [说明] 参数 false 表示不跳过移动保护，仍然会走 CanSpawnFootprint 和同脚冷却判断。
+            if (nextLeftFoot)
+                SpawnLeftFootprint(false);
+            else
+                SpawnRightFootprint(false);
 
-        if (nextLeftFoot)
-            SpawnLeftFootprint(false);
+            // [说明] 生成完成后，把本次角色位置记录为下一次距离判断的起点。
+            // [说明] 同时翻转 nextLeftFoot，让下一步换另一只脚。
+            lastStepPos = characterRoot.position;
+            nextLeftFoot = !nextLeftFoot;
+        }
+        // [说明] 非距离生成模式下，Update 不做事。
+        // [说明] 此时脚印入口应该来自动画事件，而不是每帧距离检测。
         else
-            SpawnRightFootprint(false);
+        {
+            return;
+        }
 
-        lastStepPos = characterRoot.position;
-        nextLeftFoot = !nextLeftFoot;
+        
     }
 
 
@@ -411,42 +440,40 @@ public class FootprintBrushSpawner : MonoBehaviour
         SpawnRightFootprint(false);
     }
 
+    // [说明] 左脚内部生成入口。
+    // [说明] 动画事件和距离模式最终都会走到这里，再统一调用 SpawnFootprint。
     private void SpawnLeftFootprint(bool ignoreMovementGuard)
     {
+        // [说明] 不忽略移动保护时，先检查当前是否真的允许生成脚印。
+        // [说明] 例如刚开局、没移动输入、MoveSpeed 太低、prefab 未绑定时都会被拦截。
         if (!ignoreMovementGuard && !CanSpawnFootprint())
             return;
 
+        // [说明] 同一只脚有最小时间间隔，防止同一个动画落脚点连续触发多次事件。
         if (!ignoreMovementGuard && Time.time - lastLeftFootTime < minTimeBetweenSameFoot)
             return;
 
+        // [说明] 记录左脚这次生成时间，然后把左脚骨骼、左脚脚趾、左脚贴图传给通用生成函数。
         lastLeftFootTime = Time.time;
 
-        SpawnFootprint(
-            true,
-            leftFoot,
-            leftToes,
-            leftNormalTex,
-            leftHeightTex
-        );
+        SpawnFootprint(true,leftFoot,leftToes,leftNormalTex,leftHeightTex);
     }
 
+    // [说明] 右脚内部生成入口，逻辑和左脚一致，只是传入右脚骨骼和右脚贴图。
     private void SpawnRightFootprint(bool ignoreMovementGuard)
     {
         if (!ignoreMovementGuard && !CanSpawnFootprint())
             return;
 
+        // [说明] 右脚也单独记录冷却时间，避免右脚动画事件重复生成。
         if (!ignoreMovementGuard && Time.time - lastRightFootTime < minTimeBetweenSameFoot)
             return;
 
+        // [说明] 记录右脚这次生成时间，然后把右脚数据交给 SpawnFootprint 统一处理。
         lastRightFootTime = Time.time;
 
-        SpawnFootprint(
-            false,
-            rightFoot,
-            rightToes,
-            rightNormalTex,
-            rightHeightTex
-        );
+        SpawnFootprint(false,rightFoot,rightToes,rightNormalTex,rightHeightTex);
+
     }
 
 
@@ -454,17 +481,23 @@ public class FootprintBrushSpawner : MonoBehaviour
     // Spawn Logic
     // ============================================================
 
+    // [说明] 统一的脚印生成条件检查。
+    // [说明] 这个函数只判断“能不能生成”，不负责计算位置，也不实例化 Brush。
     private bool CanSpawnFootprint()
     {
+        // [说明] 刚进入场景的一小段时间不允许生成，避免 Animator 初始化或角色落地瞬间误触发脚印。
         if (Time.timeSinceLevelLoad < startBlockTime)
             return false;
 
+        // [说明] 没有 Brush prefab 或角色根节点时，后面的生成逻辑没有意义，直接拒绝。
         if (brushPrefab == null || characterRoot == null)
             return false;
 
+        // [说明] 如果要求有移动输入，则玩家没有按方向键/摇杆时不生成脚印。
         if (requireMoveInput && playerController != null && !playerController.HasMoveInput)
             return false;
 
+        // [说明] 如果要求 Animator 速度有效，则读取 MoveSpeed 参数，过滤站立、轻微抖动、过渡动画。
         if (requireAnimatorMoveSpeed && animator != null && HasAnimatorFloat(animator, moveSpeedParam))
         {
             float moveSpeed = animator.GetFloat(moveSpeedParam);
@@ -476,11 +509,14 @@ public class FootprintBrushSpawner : MonoBehaviour
         return true;
     }
 
+    // [说明] 检查 Animator 里是否存在指定的 float 参数。
+    // [说明] 这样可以避免直接 GetFloat 一个不存在的参数导致报错或警告。
     private bool HasAnimatorFloat(Animator targetAnimator, string paramName)
     {
         if (targetAnimator == null || string.IsNullOrEmpty(paramName))
             return false;
 
+        // [说明] 遍历 Animator 参数列表，只接受名字相同且类型为 Float 的参数。
         foreach (AnimatorControllerParameter p in targetAnimator.parameters)
         {
             if (p.name == paramName && p.type == AnimatorControllerParameterType.Float)
@@ -490,6 +526,8 @@ public class FootprintBrushSpawner : MonoBehaviour
         return false;
     }
 
+    // [说明] 根据当前移动速度选择脚印前后修正值。
+    // [说明] 跑步时脚掌落点通常更靠前，所以使用 runFootForwardOffset。
     private float GetCurrentFootForwardOffset()
     {
         if (animator == null || !HasAnimatorFloat(animator, moveSpeedParam))
@@ -503,6 +541,8 @@ public class FootprintBrushSpawner : MonoBehaviour
         return walkFootForwardOffset;
     }
 
+    // [说明] 根据当前移动速度选择脚印尺寸。
+    // [说明] 跑步时脚印可以稍微更大，表现更重的踩踏感。
     private Vector2 GetCurrentFootprintSize()
     {
         if (animator == null || !HasAnimatorFloat(animator, moveSpeedParam))
@@ -516,25 +556,27 @@ public class FootprintBrushSpawner : MonoBehaviour
         return walkFootprintSize;
     }
 
-    private void SpawnFootprint(
-        bool isLeftFoot,
-        Transform footTransform,
-        Transform toeTransform,
-        Texture normalTex,
-        Texture heightTex)
+    // [说明] 核心生成函数。
+    // [说明] 这里完成：脚掌中心计算、Raycast 贴地、朝向计算、Brush 实例化、贴图参数设置、通知 RT 管理器。
+    private void SpawnFootprint(bool isLeftFoot,Transform footTransform,Transform toeTransform,Texture normalTex,Texture heightTex)
     {
+        // [说明] 没有 Brush prefab 就无法生成临时投影 Quad，直接退出。
         if (brushPrefab == null)
             return;
 
+        // [说明] 将 bool 类型的左右脚转换成 Debug 用枚举，方便后面缓存和绘制 Gizmos。
         DebugFootSide debugFootSide = isLeftFoot ? DebugFootSide.Left : DebugFootSide.Right;
 
         Vector3 footBonePosition;
         Vector3 toeBonePosition = Vector3.zero;
         bool hasToe = toeTransform != null;
 
+        // [说明] 优先使用真实 Foot 骨骼位置。
+        // [说明] 这样脚印会跟动画脚步位置一致，而不是简单地跟角色中心偏移。
         if (footTransform != null)
         {
             footBonePosition = footTransform.position;
+        // [说明] 如果没有绑定 Foot 骨骼，则使用角色左右方向加 footSideOffset 做一个 fallback 落点。
         }
         else
         {
@@ -550,8 +592,12 @@ public class FootprintBrushSpawner : MonoBehaviour
             footBonePosition = characterRoot.position + right * side;
         }
 
+        // [说明] footCenterPosition 是后续 Raycast 的脚掌中心。
+        // [说明] 默认先用 Foot 骨骼位置，若存在 Toes 再向脚趾方向插值。
         Vector3 footCenterPosition = footBonePosition;
 
+        // [说明] 有 Toes 骨骼时，用 Foot -> Toes 的插值点近似脚掌中心。
+        // [说明] toeBlend 越大，采样点越靠近脚尖。
         if (hasToe)
         {
             toeBonePosition = toeTransform.position;
@@ -562,19 +608,18 @@ public class FootprintBrushSpawner : MonoBehaviour
             );
         }
 
+        // [说明] Raycast 从脚掌中心上方开始，向下检测地面。
+        // [说明] 这样可以兼容脚骨骼略微穿地或悬空的情况。
         Vector3 rayOrigin = footCenterPosition + Vector3.up * rayStartHeight;
         float totalRayDistance = rayStartHeight + rayDistance;
         Vector3 rayEnd = rayOrigin + Vector3.down * totalRayDistance;
 
+        // [说明] 当前脚印大小会根据走路/跑步状态动态选择。
         Vector2 currentBrushSize = GetCurrentFootprintSize();
 
-        if (!Physics.Raycast(
-                rayOrigin,
-                Vector3.down,
-                out RaycastHit hit,
-                totalRayDistance,
-                groundMask,
-                QueryTriggerInteraction.Ignore))
+        // [说明] 没有射到地面就不生成脚印。
+        // [说明] 同时缓存失败数据，方便 Scene 视图里看到 Raycast 为什么没命中。
+        if (!Physics.Raycast(rayOrigin, Vector3.down,out RaycastHit hit,totalRayDistance,groundMask,QueryTriggerInteraction.Ignore))
         {
             CacheBrushDebugData(
                 debugFootSide,
@@ -605,8 +650,10 @@ public class FootprintBrushSpawner : MonoBehaviour
             return;
         }
 
+        // [说明] Raycast 命中的地面法线，用来让 Brush 贴合斜坡或不平整表面。
         Vector3 normal = hit.normal;
 
+        // [说明] 表面遮罩用于限制脚印只出现在湿地、雪地、泥地等指定区域。
         if (useSurfaceMask && wetlandMask != null)
         {
             if (!wetlandMask.CanSpawnAt(hit.point))
@@ -618,17 +665,20 @@ public class FootprintBrushSpawner : MonoBehaviour
             }
         }
 
-        Vector3 forwardOnSurface = GetFootForwardOnSurface(
-            footTransform,
-            toeTransform,
-            normal
-        );
+        // [说明] 计算脚尖方向，并投影到地面切平面上。
+        // [说明] 这样脚印朝向会贴着地面，而不是带有脚骨骼的上下倾斜。
+        Vector3 forwardOnSurface = GetFootForwardOnSurface(footTransform,toeTransform,normal);
 
+        // [说明] 根据脚尖方向和地面法线算出脚印的右方向，用于左右局部偏移。
         Vector3 rightOnSurface = Vector3.Cross(forwardOnSurface, normal).normalized;
 
+        // [说明] 前向偏移负责把脚骨骼位置修正到脚掌落印位置。
+        // [说明] localOffset 用来分别微调左脚和右脚，解决模型脚骨骼和贴图中心不完全一致的问题。
         float currentForwardOffset = GetCurrentFootForwardOffset();
         Vector2 localOffset = isLeftFoot ? leftLocalOffset : rightLocalOffset;
 
+        // [说明] 最终 Brush 生成点 = 地面命中点 + 前后修正 + 左右局部修正 + 法线方向抬高。
+        // [说明] surfaceOffset 可以避免 Brush 和地面 z-fighting。
         Vector3 spawnPosition =
             hit.point +
             forwardOnSurface * currentForwardOffset +
@@ -636,14 +686,20 @@ public class FootprintBrushSpawner : MonoBehaviour
             forwardOnSurface * localOffset.y +
             normal * surfaceOffset;
 
+        // [说明] Quad 默认面朝自身 local +Z 或 -Z 的方向，这里用 -normal 让 Brush 面朝地面。
+        // [说明] 第二个参数 forwardOnSurface 决定脚印贴图的脚尖朝向。
         Quaternion spawnRotation = Quaternion.LookRotation(-normal, forwardOnSurface);
 
+        // [说明] yawOffset 用于最终角度微调。
+        // [说明] footprintYawOffset 是整体修正，leftYawOffset/rightYawOffset 是左右脚单独修正。
         float yawOffset =
             footprintYawOffset +
             (isLeftFoot ? leftYawOffset : rightYawOffset);
 
+        // [说明] 绕地面法线旋转，保证只改变贴图朝向，不破坏 Brush 贴地姿态。
         spawnRotation = Quaternion.AngleAxis(yawOffset, normal) * spawnRotation;
 
+        // [说明] 成功命中地面后，把本次计算结果缓存起来，供 OnDrawGizmos 绘制调试信息。
         CacheBrushDebugData(
             debugFootSide,
             footBonePosition,
@@ -662,12 +718,13 @@ public class FootprintBrushSpawner : MonoBehaviour
             currentBrushSize
         );
 
-        GameObject brush = Instantiate(
-            brushPrefab,
-            spawnPosition,
-            spawnRotation
-        );
+        // [说明] 实例化临时 Brush。
+        // [说明] 它不会长期留在场景里，只需要存活到 FootstepCamera 拍到它。
+        GameObject brush = Instantiate(brushPrefab,spawnPosition,spawnRotation);
+        
 
+        // [说明] Brush 必须放到 FootprintBrush Layer。
+        // [说明] RenderFeature 会用 LayerMask 只渲染这一层，避免把其他物体拍进 CurrentBrushRT。
         int brushLayer = LayerMask.NameToLayer(brushLayerName);
 
         if (brushLayer >= 0)
@@ -679,6 +736,7 @@ public class FootprintBrushSpawner : MonoBehaviour
             Debug.LogWarning($"[FootprintBrushSpawner] 找不到 Layer: {brushLayerName}");
         }
 
+        // [说明] 覆盖 prefab 缩放后，脚印大小完全由 walkFootprintSize / runFootprintSize 控制。
         if (overrideBrushScale)
         {
             brush.transform.localScale = new Vector3(
@@ -688,9 +746,13 @@ public class FootprintBrushSpawner : MonoBehaviour
             );
         }
 
+        // [说明] 给 Brush Renderer 传入左右脚对应的 NormalTex / HeightTex，并关闭阴影。
+        // [说明] Brush 是写 RT 的临时数据，不应该参与场景真实光照和投影。
         SetupBrushMaterial(brush, normalTex, heightTex);
         DisableBrushShadows(brush);
 
+        // [说明] 通知 RT 管理器“这一帧确实生成了新 Brush”。
+        // [说明] 后续 RenderFeature / RT 管理器可以据此决定是否需要累积当前 Brush。
         if (FootprintRTManager.Active != null)
         {
             FootprintRTManager.Active.NotifyBrushSpawned();
@@ -708,9 +770,13 @@ public class FootprintBrushSpawner : MonoBehaviour
             );
         }
 
+        // [说明] Brush 只需要短暂存在。
+        // [说明] brushLife 要保证至少覆盖一次 FootstepCamera 渲染，否则可能还没拍到就被销毁。
         Destroy(brush, brushLife);
     }
 
+    // [说明] 计算脚印在地面上的前方方向。
+    // [说明] 优先使用 Foot -> Toes，其次用 Foot.forward，最后用角色整体 forward。
     private Vector3 GetFootForwardOnSurface(
         Transform footTransform,
         Transform toeTransform,
@@ -737,8 +803,11 @@ public class FootprintBrushSpawner : MonoBehaviour
             forward = characterRoot.forward;
         }
 
+        // [说明] 把前方方向投影到地面平面上，去掉沿地面法线的分量。
+        // [说明] 这样脚印方向始终贴着坡面。
         forward = Vector3.ProjectOnPlane(forward, normal);
 
+        // [说明] 如果投影后方向几乎为零，就用世界前方再投影一次作为兜底。
         if (forward.sqrMagnitude < 0.0001f)
         {
             forward = Vector3.ProjectOnPlane(Vector3.forward, normal);
@@ -752,21 +821,29 @@ public class FootprintBrushSpawner : MonoBehaviour
     // Brush Setup
     // ============================================================
 
+    // [说明] 给 Brush 的所有 Renderer 设置材质参数。
+    // [说明] 使用 MaterialPropertyBlock 可以避免实例化材质，减少运行时材质副本。
     private void SetupBrushMaterial(GameObject brush, Texture normalTex, Texture heightTex)
     {
+        // [说明] prefab 可能包含多个 Renderer，因此这里递归获取所有子 Renderer。
         Renderer[] renderers = brush.GetComponentsInChildren<Renderer>();
 
         foreach (Renderer r in renderers)
         {
+            // [说明] 先读取已有 PropertyBlock，再追加脚印纹理和强度参数，避免覆盖其他外部设置。
             MaterialPropertyBlock mpb = new MaterialPropertyBlock();
             r.GetPropertyBlock(mpb);
 
+            // [说明] NormalTex 写入 Brush shader 的 _NormalTex，用来输出脚印法线到 CurrentBrushRT。
             if (normalTex != null)
                 mpb.SetTexture(NormalTexID, normalTex);
 
+            // [说明] HeightTex 写入 Brush shader 的 _HeightTex，用来输出脚印凹陷/泥边高度信息。
             if (heightTex != null)
                 mpb.SetTexture(HeightTexID, heightTex);
 
+            // [说明] 这些参数控制 Brush shader 对法线和高度的解释。
+            // [说明] 如果脚印凹凸方向反了，优先检查 invertHeight。
             mpb.SetFloat(NormalStrengthID, normalStrength);
             mpb.SetFloat(HeightStrengthID, heightStrength);
             mpb.SetFloat(InvertHeightID, invertHeight);
@@ -775,6 +852,8 @@ public class FootprintBrushSpawner : MonoBehaviour
         }
     }
 
+    // [说明] 关闭 Brush 的阴影相关设置。
+    // [说明] Brush 是给 FootstepCamera 写 RT 的工具物体，不应该影响主场景阴影。
     private void DisableBrushShadows(GameObject brush)
     {
         foreach (Renderer r in brush.GetComponentsInChildren<Renderer>())
@@ -784,6 +863,7 @@ public class FootprintBrushSpawner : MonoBehaviour
         }
     }
 
+    // [说明] 递归设置 Layer，保证 prefab 子物体也能被 FootprintRenderFeature 的 LayerMask 捕获。
     private static void SetLayerRecursively(GameObject go, int layer)
     {
         go.layer = layer;
@@ -799,6 +879,8 @@ public class FootprintBrushSpawner : MonoBehaviour
     // Debug Cache
     // ============================================================
 
+    // [说明] 缓存一次脚印生成过程中的关键数据。
+    // [说明] 这些数据不会影响运行逻辑，只服务于 Scene 视图 Gizmos 调试。
     private void CacheBrushDebugData(
         DebugFootSide footSide,
         Vector3 footBonePosition,
@@ -816,6 +898,7 @@ public class FootprintBrushSpawner : MonoBehaviour
         Vector3 rightOnSurface,
         Vector2 brushSize)
     {
+        // [说明] 把脚骨骼、Raycast、命中点、最终生成点、方向、尺寸等数据打包保存。
         FootprintBrushDebugData data = new FootprintBrushDebugData
         {
             valid = true,
@@ -846,6 +929,7 @@ public class FootprintBrushSpawner : MonoBehaviour
             time = Time.time
         };
 
+        // [说明] 左右脚分别缓存，避免右脚生成后把左脚最后一次调试信息覆盖掉。
         if (footSide == DebugFootSide.Left)
             lastLeftDebugData = data;
         else
@@ -857,6 +941,8 @@ public class FootprintBrushSpawner : MonoBehaviour
     // Gizmos
     // ============================================================
 
+    // [说明] Scene 视图调试入口。
+    // [说明] 只负责画辅助线和辅助点，不参与脚印生成。
     private void OnDrawGizmos()
     {
         if (!showFootprintDebugGizmos)
@@ -869,11 +955,15 @@ public class FootprintBrushSpawner : MonoBehaviour
             DrawBrushDebugData(lastRightDebugData);
     }
 
+    // [说明] 根据缓存的数据绘制某一只脚的调试信息。
+    // [说明] 可以逐项开关 Foot、Toes、Raycast、Hit、SpawnPoint、Forward、BrushPlane、BrushBox。
     private void DrawBrushDebugData(FootprintBrushDebugData data)
     {
+        // [说明] 没有有效缓存数据时不绘制，避免 Scene 视图出现无意义的默认点。
         if (!data.valid)
             return;
 
+        // [说明] 左右脚使用不同颜色，方便在 Scene 视图里区分当前调试的是哪只脚。
         Color footColor = data.footSide == DebugFootSide.Left
             ? new Color(0.2f, 0.7f, 1f, 1f)
             : new Color(1f, 0.45f, 0.2f, 1f);
@@ -910,6 +1000,8 @@ public class FootprintBrushSpawner : MonoBehaviour
             DrawDebugLabel(data.rayOrigin, $"{footName} Ray Origin");
         }
 
+        // [说明] Raycast 没命中时，只画到射线阶段。
+        // [说明] 命中点、生成点、Brush 平面等数据都没有意义，所以直接结束。
         if (!data.rayHit)
             return;
 
@@ -962,11 +1054,14 @@ public class FootprintBrushSpawner : MonoBehaviour
             DrawBrushBoxGizmo(data);
     }
 
+    // [说明] 绘制 Brush 的实际覆盖矩形。
+    // [说明] 这个矩形可以帮助判断脚印贴图是否和脚掌位置、方向、大小一致。
     private void DrawBrushPlaneGizmo(FootprintBrushDebugData data)
     {
         if (data.brushSize.x <= 0f || data.brushSize.y <= 0f)
             return;
 
+        // [说明] 修改 Gizmos.matrix 前先保存旧状态，画完后必须恢复，避免影响其他 Gizmos。
         Matrix4x4 oldMatrix = Gizmos.matrix;
         Color oldColor = Gizmos.color;
 
@@ -1004,6 +1099,8 @@ public class FootprintBrushSpawner : MonoBehaviour
         Gizmos.color = oldColor;
     }
 
+    // [说明] 绘制一个很薄的 Brush 调试盒。
+    // [说明] 视觉上类似 Decal 投射盒，方便观察 Brush 的位置、朝向和覆盖范围。
     private void DrawBrushBoxGizmo(FootprintBrushDebugData data)
     {
         if (data.brushSize.x <= 0f || data.brushSize.y <= 0f)
@@ -1029,6 +1126,8 @@ public class FootprintBrushSpawner : MonoBehaviour
         Gizmos.color = oldColor;
     }
 
+    // [说明] 在 Scene 视图里绘制文字标签。
+    // [说明] 只在 Unity Editor 下生效，打包后不会包含 Handles.Label。
     private void DrawDebugLabel(Vector3 position, string text)
     {
 #if UNITY_EDITOR
