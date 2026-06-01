@@ -102,29 +102,29 @@ Shader "Snow/SnowTrailBrush"
                 half forward = abs((half)p.y);
 
                 // =====================================================
-// Capsule Length Mask
-//
-// 让 Brush 前后端变成圆弧，而不是横向直线。
-// p.x 控制左右宽度，p.y 控制前后长度。
-// capsuleY 越大，前后圆头越明显。
-// =====================================================
-half capsuleY = saturate(1.0h - _LengthSoftness);
+                // Capsule Length Mask
+                //
+                // 让 Brush 前后端变成圆弧，而不是横向直线。
+                // p.x 控制左右宽度，p.y 控制前后长度。
+                // capsuleY 越大，前后圆头越明显。
+                // =====================================================
+                half capsuleY = saturate(1.0h - _LengthSoftness);
 
-// 中间直段：abs(p.y) <= capsuleY
-// 两端圆头：abs(p.y) > capsuleY
-half2 capP = half2(
-    side,
-    max(0.0h, forward - capsuleY) / max(0.0001h, 1.0h - capsuleY)
-);
+                // 中间直段：abs(p.y) <= capsuleY
+                // 两端圆头：abs(p.y) > capsuleY
+                half2 capP = half2(
+                    side,
+                    max(0.0h, forward - capsuleY) / max(0.0001h, 1.0h - capsuleY)
+                );
 
-// 胶囊距离。
-// 中间区域主要由 side 控制；
-// 前后圆头区域由 side + forward 共同控制。
-half capsuleDist = length(capP);
+                // 胶囊距离。
+                // 中间区域主要由 side 控制；
+                // 前后圆头区域由 side + forward 共同控制。
+                half capsuleDist = length(capP);
 
-// 胶囊整体 mask。
-// capsuleDist <= 1 内有效，外侧渐隐。
-half lengthMask = 1.0h - SafeSmoothStep(1.0h - _LengthSoftness, 1.0h, capsuleDist);
+                // 胶囊整体 mask。
+                // capsuleDist <= 1 内有效，外侧渐隐。
+                half lengthMask = 1.0h - SafeSmoothStep(1.0h - _LengthSoftness, 1.0h, capsuleDist);
 
                 // -----------------------------------------------------
                 // Center Sink

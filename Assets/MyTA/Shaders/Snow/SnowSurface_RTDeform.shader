@@ -164,6 +164,21 @@ Shader "Snow/SnowSurface_RTDeform"
                 half4 data = SAMPLE_TEXTURE2D(_FootstepTex, sampler_FootstepTex, uv);
                 return data * inside;
             }
+            
+            half4 DecodeSnowData(half4 data)
+            {
+                // RT 协议：
+                // R = sink，下陷
+                // G = rim，凸起
+                // A = mask，有效区域
+
+                half mask = saturate(data.a);
+
+                half sink = saturate(data.r) * mask;
+                half rim  = saturate(data.g) * mask;
+
+                return half4(sink, rim, 0.0h, mask);
+            }
 
             // Snow RT 协议：
             // R = sink，雪被压下去的强度。
@@ -171,8 +186,10 @@ Shader "Snow/SnowSurface_RTDeform"
             // A = mask，brush 覆盖范围。
             half SnowDisplacementFromData(half4 data)
             {
-                half sink = saturate(data.r);
-                half rim  = saturate(data.g);
+                half4 snow = DecodeSnowData(data);
+
+                half sink = snow.r;
+                half rim  = snow.g;
 
                 // sink 往下，rim 往上。
                 return (rim * _RimHeight - sink * _MaxSnowSink) * _SnowDeformStrength;
@@ -221,7 +238,7 @@ Shader "Snow/SnowSurface_RTDeform"
 
                 // 这里按世界 Y 方向位移，适合水平雪面。
                 // 如果你的雪面是大斜坡，可以改成 positionWS += normalWS * displacement。
-                positionWS.y += displacement;
+                positionWS += normalWS * displacement;
 
                 OUT.positionHCS = TransformWorldToHClip(positionWS);
                 OUT.positionWS = positionWS;
@@ -237,12 +254,11 @@ Shader "Snow/SnowSurface_RTDeform"
                 half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv);
                 half3 albedo = baseSample.rgb * _BaseColor.rgb * _Brightness;
 
-                half inside = FootUVInside(IN.footUV) * _EnableFootstep;
-                half4 snowData = SampleSnowRT(IN.footUV);
+                half4 snowData = DecodeSnowData(SampleSnowRT(IN.footUV));
 
-                half sink = saturate(snowData.r) * inside;
-                half rim  = saturate(snowData.g) * inside;
-                half mask = saturate(max(max(sink, rim), snowData.a)) * inside;
+                half sink = snowData.r;
+                half rim  = snowData.g;
+                half mask = snowData.a;
 
                 half depressionMask = SafeSmoothStep(_SnowMaskSmoothMin, _SnowMaskSmoothMax, sink);
                 half rimMask = SafeSmoothStep(_SnowMaskSmoothMin, _SnowMaskSmoothMax, rim);

@@ -1,9 +1,16 @@
-Shader "Snow/SnowCircleBrush"
+Shader "Snow/SnowFootprintBrush"
 {
     Properties
     {
+        _FootprintHeight ("Footprint Height", 2D) = "gray" {}
+
         _SinkStrength ("Sink Strength", Range(0, 1)) = 1
-        _Softness ("Edge Softness", Range(0.01, 1)) = 0.35
+        _RaiseStrength ("Raise Strength", Range(0, 1)) = 1
+
+        _NeutralHeight ("Neutral Height", Range(0, 1)) = 0.5
+        _Threshold ("Dead Zone", Range(0, 0.2)) = 0.02
+        _Softness ("Mask Softness", Range(0.001, 0.3)) = 0.05
+        _Power ("Shape Power", Range(0.2, 4)) = 1
     }
 
     SubShader
@@ -17,14 +24,14 @@ Shader "Snow/SnowCircleBrush"
 
         Pass
         {
-            Name "SnowCircleBrush"
+            Name "SnowFootprintHeightBrush"
             Tags { "LightMode" = "UniversalForward" }
 
             Cull Off
             ZWrite Off
             ZTest Always
 
-            // 多个 brush 同一帧重叠时，取更强的那个
+            // 多个脚印重叠时，每个通道取最大值
             BlendOp Max
             Blend One One
 
@@ -35,9 +42,17 @@ Shader "Snow/SnowCircleBrush"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
+            TEXTURE2D(_FootprintHeight);
+            SAMPLER(sampler_FootprintHeight);
+
             CBUFFER_START(UnityPerMaterial)
+                float4 _FootprintHeight_ST;
                 float _SinkStrength;
+                float _RaiseStrength;
+                float _NeutralHeight;
+                float _Threshold;
                 float _Softness;
+                float _Power;
             CBUFFER_END
 
             struct Attributes
@@ -55,26 +70,37 @@ Shader "Snow/SnowCircleBrush"
             Varyings vert(Attributes input)
             {
                 Varyings output;
-
                 output.positionHCS = TransformObjectToHClip(input.positionOS.xyz);
-                output.uv = input.uv;
-
+                output.uv = TRANSFORM_TEX(input.uv, _FootprintHeight);
                 return output;
             }
 
             half4 frag(Varyings input) : SV_Target
             {
-                float2 p = input.uv * 2.0 - 1.0;
+                float heightValue = SAMPLE_TEXTURE2D(
+                    _FootprintHeight,
+                    sampler_FootprintHeight,
+                    input.uv
+                ).r;
 
-                float d = length(p);
+                // 0.5 是中性高度
+                // < 0.5 = 凹陷
+                // > 0.5 = 凸起
+                float depression01 = saturate((_NeutralHeight - heightValue) / max(_NeutralHeight, 0.0001));
+                float raise01 = saturate((heightValue - _NeutralHeight) / max(1.0 - _NeutralHeight, 0.0001));
 
-                float inner = saturate(1.0 - _Softness);
+                // mask 只负责去掉 0.5 附近的灰色背景误差
+                float depressionMask = smoothstep(_Threshold, _Threshold + _Softness, depression01);
+                float raiseMask = smoothstep(_Threshold, _Threshold + _Softness, raise01);
 
-                float mask = 1.0 - smoothstep(inner, 1.0, d);
+                // 真正写入 RT 的强度，保留高度图本身的深浅变化
+                float depression = pow(depression01, _Power) * depressionMask * _SinkStrength;
+                float raise = pow(raise01, _Power) * raiseMask * _RaiseStrength;
 
-                float sink = mask * _SinkStrength;
+                // A 通道不要乘强度，只表示这个区域是否有效
+                float mask = saturate(max(depressionMask, raiseMask));
 
-                return half4(sink, 0.0, 0.0, mask);
+                return half4(depression, raise, 0.0, mask);
             }
 
             ENDHLSL

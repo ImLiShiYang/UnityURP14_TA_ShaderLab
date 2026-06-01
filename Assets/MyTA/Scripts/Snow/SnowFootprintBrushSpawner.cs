@@ -192,9 +192,25 @@ public class SnowFootprintBrushSpawner : MonoBehaviour
     [Range(0f, 1f)]
     public float sinkStrength = 1f;
 
-    [Tooltip("圆形 Brush 边缘柔和程度。越大边缘越软。")]
-    [Range(0.01f, 1f)]
-    public float softness = 0.35f;
+    [Tooltip("写入 Snow RT 的凸起强度。0=没有雪边，1=最大凸起。")]
+    [Range(0f, 1f)]
+    public float raiseStrength = 0.5f;
+
+    [Tooltip("高度图中性值。你的高度图背景是 0.5。")]
+    [Range(0f, 1f)]
+    public float neutralHeight = 0.5f;
+
+    [Tooltip("去掉 0.5 附近灰色背景误差。")]
+    [Range(0f, 0.2f)]
+    public float threshold = 0.02f;
+
+    [Tooltip("高度图 mask 边缘柔和程度。")]
+    [Range(0.001f, 0.3f)]
+    public float softness = 0.05f;
+
+    [Tooltip("脚印形状对比度。>1 更硬，<1 更软。")]
+    [Range(0.2f, 4f)]
+    public float power = 1f;
 
 
     // ============================================================
@@ -279,8 +295,13 @@ public class SnowFootprintBrushSpawner : MonoBehaviour
     private float lastLeftFootTime = -999f;
     private float lastRightFootTime = -999f;
 
+    private static readonly int FootprintHeightID = Shader.PropertyToID("_FootprintHeight");
     private static readonly int SinkStrengthID = Shader.PropertyToID("_SinkStrength");
+    private static readonly int RaiseStrengthID = Shader.PropertyToID("_RaiseStrength");
+    private static readonly int NeutralHeightID = Shader.PropertyToID("_NeutralHeight");
+    private static readonly int ThresholdID = Shader.PropertyToID("_Threshold");
     private static readonly int SoftnessID = Shader.PropertyToID("_Softness");
+    private static readonly int PowerID = Shader.PropertyToID("_Power");
 
     private enum DebugFootSide
     {
@@ -738,7 +759,7 @@ public class SnowFootprintBrushSpawner : MonoBehaviour
             );
         }
 
-        SetupBrushMaterial(brush);
+        SetupBrushMaterial(brush,heightTex);
         DisableBrushShadows(brush);
 
         // [说明] 通知 RT 管理器“这一帧确实生成了新 Brush”。
@@ -813,7 +834,9 @@ public class SnowFootprintBrushSpawner : MonoBehaviour
 
     // [说明] 给 Brush 的所有 Renderer 设置材质参数。
     // [说明] 使用 MaterialPropertyBlock 可以避免实例化材质，减少运行时材质副本。
-    private void SetupBrushMaterial(GameObject brush)
+    // [说明] 给 Brush 的所有 Renderer 设置材质参数。
+// [说明] 使用 MaterialPropertyBlock 可以避免实例化材质，减少运行时材质副本。
+    private void SetupBrushMaterial(GameObject brush, Texture heightTex)
     {
         Renderer[] renderers = brush.GetComponentsInChildren<Renderer>();
 
@@ -822,11 +845,32 @@ public class SnowFootprintBrushSpawner : MonoBehaviour
             MaterialPropertyBlock mpb = new MaterialPropertyBlock();
             r.GetPropertyBlock(mpb);
 
-            // 写入 Snow/SnowCircleBrush 使用的参数。
-            // _SinkStrength 控制这个 Brush 把雪压下去多少。
-            // _Softness 控制圆形边缘过渡有多软。
+            // Snow/SnowFootprintBrush:
+            // _FootprintHeight = 0.5 中性高度图
+            // _SinkStrength    = 下陷强度
+            // _RaiseStrength   = 凸起强度
+            // _NeutralHeight   = 中性高度，通常 0.5
+            // _Threshold       = 灰色背景死区
+            // _Softness        = mask 柔和度
+            // _Power           = 高度图对比度
+            if (heightTex != null)
+            {
+                mpb.SetTexture(FootprintHeightID, heightTex);
+            }
+            else if (logSpawn)
+            {
+                Debug.LogWarning(
+                    $"[SnowFootprintBrushSpawner] Height texture is null on {r.name}. " +
+                    "Brush will use material default _FootprintHeight."
+                );
+            }
+
             mpb.SetFloat(SinkStrengthID, sinkStrength);
+            mpb.SetFloat(RaiseStrengthID, raiseStrength);
+            mpb.SetFloat(NeutralHeightID, neutralHeight);
+            mpb.SetFloat(ThresholdID, threshold);
             mpb.SetFloat(SoftnessID, softness);
+            mpb.SetFloat(PowerID, power);
 
             r.SetPropertyBlock(mpb);
         }
