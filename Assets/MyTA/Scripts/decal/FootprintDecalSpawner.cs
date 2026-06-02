@@ -554,6 +554,8 @@ public class FootprintDecalSpawner : MonoBehaviour
         // leftFootTexture 是左脚脚印贴图。
         // 传进去后，生成的 decal 会使用左脚的纹理。
         // SpawnFootprint(leftFoot, leftFootTexture);
+        
+        
         SpawnFootprint(DebugFootSide.Left, leftFoot, leftToes, leftFootTexture);
     }
 
@@ -589,6 +591,8 @@ public class FootprintDecalSpawner : MonoBehaviour
         if (footTransform == null || footprintPrefab == null)
             return;
 
+        
+        
         // 记录脚骨骼位置
         Vector3 footBonePosition = footTransform.position;
         
@@ -713,7 +717,7 @@ public class FootprintDecalSpawner : MonoBehaviour
             
         Texture2D footHeightTexture =footSide == DebugFootSide.Left ? leftFootHeightTexture : rightFootHeightTexture;
             
-                
+        
         
         if (usePooling && footprintPool != null)
         {

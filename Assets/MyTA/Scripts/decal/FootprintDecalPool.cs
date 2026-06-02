@@ -254,7 +254,7 @@ public class FootprintDecalPool : MonoBehaviour
         // 记录为正在使用
         pooled.IsActiveInPool = true;
         _active.AddLast(pooled);
-
+        
         // 开始生命周期：完整显示 → 淡出 → 回收到池
         pooled.PlayLifetime(visibleTime, fadeTime, opacity);
         

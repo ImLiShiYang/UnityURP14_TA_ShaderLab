@@ -10,9 +10,10 @@ using UnityEngine;
 /// - SpawnRightFootprint()
 ///
 /// 然后这个脚本可以同时转发给：
-/// 1. 旧 Decal 脚印系统
-/// 2. 旧 RT Brush 脚印系统
-/// 3. 新 Snow RT Brush 雪地压痕系统
+/// 1. Decal 脚印系统
+/// 2. RT Brush 脚印系统
+/// 3. Snow RT Brush 雪地压痕系统
+/// 4. Shallow Water Ripple 浅水脚步水波系统
 ///
 /// 这样动画里仍然只需要保留一套 Animation Event。
 /// </summary>
@@ -42,6 +43,14 @@ public class FootstepEventReceiver : MonoBehaviour
     public SnowFootprintBrushSpawner snowBrushSpawner;
 
 
+    [Header("Shallow Water Ripple")]
+    [Tooltip("是否把动画事件转发给浅水脚步水波系统。")]
+    public bool enableWaterRipple = true;
+
+    [Tooltip("浅水脚步水波生成器。")]
+    public ShallowWaterFootRipple waterRipple;
+
+
     [Header("Debug")]
     public bool logEvent = false;
 
@@ -61,6 +70,11 @@ public class FootstepEventReceiver : MonoBehaviour
         if (snowBrushSpawner == null)
         {
             snowBrushSpawner = GetComponentInParent<SnowFootprintBrushSpawner>();
+        }
+
+        if (waterRipple == null)
+        {
+            waterRipple = GetComponentInParent<ShallowWaterFootRipple>();
         }
     }
 
@@ -88,6 +102,12 @@ public class FootstepEventReceiver : MonoBehaviour
         {
             snowBrushSpawner.SpawnLeftFootprint();
         }
+        
+        if (enableWaterRipple && waterRipple != null)
+        {
+            Debug.Log("[FootstepEventReceiver] Call Left Water Ripple", this);
+            waterRipple.SpawnLeftWaterRipple();
+        }
     }
 
     /// <summary>
@@ -97,7 +117,7 @@ public class FootstepEventReceiver : MonoBehaviour
     {
         if (logEvent)
         {
-            Debug.Log("[FootstepEventReceiver] SpawnRightFootprint");
+            Debug.Log("[FootstepEventReceiver] SpawnLeftFootprint");
         }
 
         if (enableDecalFootprint && decalSpawner != null)
@@ -113,6 +133,12 @@ public class FootstepEventReceiver : MonoBehaviour
         if (enableSnowFootprint && snowBrushSpawner != null)
         {
             snowBrushSpawner.SpawnRightFootprint();
+        }
+        
+        if (enableWaterRipple && waterRipple != null)
+        {
+            Debug.Log("[FootstepEventReceiver] Call Right Water Ripple", this);
+            waterRipple.SpawnRightWaterRipple();
         }
     }
 }
