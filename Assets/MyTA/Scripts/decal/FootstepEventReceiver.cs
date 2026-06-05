@@ -50,7 +50,13 @@ public class FootstepEventReceiver : MonoBehaviour
     [Tooltip("浅水脚步水波生成器。")]
     public ShallowWaterFootRipple waterRipple;
 
-
+    [Header("波纹")]
+    [Tooltip("是否把动画事件转发给浅水脚步水波系统。")]
+    public bool enableWaterRippleBrushSpawner = true;
+    
+    [Tooltip("波纹。")]
+    public WaterRippleBrushSpawner waterRippleBrushSpawner;
+    
     [Header("Debug")]
     public bool logEvent = false;
 
@@ -75,6 +81,11 @@ public class FootstepEventReceiver : MonoBehaviour
         if (waterRipple == null)
         {
             waterRipple = GetComponentInParent<ShallowWaterFootRipple>();
+        }
+        
+        if(waterRippleBrushSpawner==null)
+        {
+            waterRippleBrushSpawner=GetComponentInParent<WaterRippleBrushSpawner>();
         }
     }
 
@@ -108,6 +119,11 @@ public class FootstepEventReceiver : MonoBehaviour
             Debug.Log("[FootstepEventReceiver] Call Left Water Ripple", this);
             waterRipple.SpawnLeftWaterRipple();
         }
+
+        if (enableWaterRippleBrushSpawner && waterRippleBrushSpawner != null)
+        {
+            waterRippleBrushSpawner.SpawnLeftWaterRipple();
+        }
     }
 
     /// <summary>
@@ -140,5 +156,11 @@ public class FootstepEventReceiver : MonoBehaviour
             Debug.Log("[FootstepEventReceiver] Call Right Water Ripple", this);
             waterRipple.SpawnRightWaterRipple();
         }
+
+        if (enableWaterRippleBrushSpawner && waterRippleBrushSpawner != null)
+        {
+            waterRippleBrushSpawner.SpawnRightWaterRipple();
+        }
+        
     }
 }
