@@ -3,7 +3,10 @@ Shader "WaterRipple/WaterRippleWaveSurface"
     Properties
     {
         [Header(Water Ripple RT)]
+        // RTManager 每帧传入：A 通道是波动方程输出的 signed height 编码值。
         _WaterRippleTex ("Water Ripple RT A Height", 2D) = "gray" {}
+
+        // x/y = min world XZ，z/w = max world XZ，用来把世界坐标映射到 RT UV。
         _WaterRippleRect ("Water Ripple Rect", Vector) = (0,0,1,1)
         _EnableWaterRipple ("Enable Water Ripple", Float) = 0
         _WaterRippleSignedDeadZone ("Signed Height Dead Zone", Range(0, 0.2)) = 0.002
@@ -134,6 +137,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
 
             float2 WorldXZToWaterRippleUV(float3 positionWS)
             {
+                // 水波捕捉相机是俯视 XZ 平面，所以这里只关心世界 X/Z。
                 float2 rectSize = _WaterRippleRect.zw - _WaterRippleRect.xy;
 
                 return float2(
@@ -153,6 +157,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
 
             float ApplySignedDeadZone(float signedValue)
             {
+                // 0.5 附近的小误差不要变成可见波纹，避免水面轻微脏闪。
                 float absValue = abs(signedValue);
 
                 if (absValue <= _WaterRippleSignedDeadZone)
@@ -166,6 +171,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
 
             float ReadRippleHeightUV(float2 uv)
             {
+                // Alpha: 0.5 无波动，低于 0.5 下陷，高于 0.5 隆起。
                 float encodedHeight = SAMPLE_TEXTURE2D_LOD(_WaterRippleTex, sampler_WaterRippleTex, uv, 0).a;
                 return ApplySignedDeadZone(encodedHeight * 2.0 - 1.0);
             }
@@ -186,6 +192,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
                 float inside = WaterRippleUVInside(uv);
                 float2 texel = max(_WaterRippleTex_TexelSize.xy, float2(0.0001, 0.0001));
 
+                // 用高度差近似坡度，后面同时给法线和屏幕折射使用。
                 float left = ReadRippleHeightUV(uv + float2(-texel.x, 0.0));
                 float right = ReadRippleHeightUV(uv + float2(texel.x, 0.0));
                 float back = ReadRippleHeightUV(uv + float2(0.0, -texel.y));
@@ -201,6 +208,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
 
             float3 BuildRippleNormalWS(float3 baseNormalWS, float2 slope)
             {
+                // 在水面自身法线附近构造世界 X/Z 切线，避免依赖模型 tangent。
                 float3 n = NormalizeSafe(baseNormalWS);
 
                 float3 worldX = float3(1.0, 0.0, 0.0);
@@ -225,6 +233,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
                 float3 normalWS = NormalizeSafe(TransformObjectToWorldNormal(IN.normalOS));
                 float height = ReadRippleHeightWS(positionWS);
 
+                // 顶点位移只做轻微起伏，主要细节仍交给像素法线和折射。
                 positionWS += normalWS * height * _WaveHeight;
 
                 OUT.positionWS = positionWS;
@@ -260,6 +269,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
                     _RefractionWaveStrength *
                     lerp(0.75, 1.35, fresnel);
 
+                // 采样 URP Opaque Texture 得到水下场景色，坡度越大折射偏移越明显。
                 half3 sceneColor = SampleSceneColor(clamp(screenUV + refractionOffset, 0.001, 0.999));
                 half3 waterTint = lerp(_DeepColor.rgb, _ShallowColor.rgb, _ColorBlend);
 
@@ -267,11 +277,13 @@ Shader "WaterRipple/WaterRippleWaveSurface"
                 float slopeAmount = saturate(length(slope) * 4.0);
                 float rippleAmount = saturate(max(waveAmount, slopeAmount));
 
+                // rippleAmount 是当前像素“水波存在感”的统一权重。
                 waterTint += _FresnelColor.rgb * rippleAmount * _RippleColorStrength;
 
                 half3 color = lerp(sceneColor, waterTint, _RefractionTintStrength);
                 color += _FresnelColor.rgb * fresnel * _FresnelStrength;
 
+                // 简化 Blinn-Phong 高光，让水波法线参与反光变化。
                 float3 halfDir = NormalizeSafe(lightDirWS + viewDirWS);
                 float spec = pow(saturate(dot(normalWS, halfDir)), _SpecularPower);
                 spec *= _SpecularStrength;
@@ -284,6 +296,7 @@ Shader "WaterRipple/WaterRippleWaveSurface"
                     rippleAmount
                 );
 
+                // 泡沫不单独模拟，只在波强位置用柔和 mask 混一点白色。
                 color = lerp(color, _FoamColor.rgb, foamMask * _FoamStrength);
 
                 half3 ambient = SampleSH(normalWS);

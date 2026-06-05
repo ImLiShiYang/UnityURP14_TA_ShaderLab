@@ -2,9 +2,13 @@ Shader "Custom/URP/waterripple_wave_equation"
 {
     Properties
     {
+        // _MainTex 是当前帧 Brush 输入，Prev/PrevPrev 是上一帧和上上帧水面高度。
+        // RT 协议：A = signed height 编码值，0.5 表示没有波动。
         _MainTex ("Input", 2D) = "gray" {}
         _PrevTex ("Prev", 2D) = "gray" {}
         _PrevPrevTex ("PrevPrev", 2D) = "gray" {}
+
+        // x = wave factor，控制扩散速度；y = decay，控制能量衰减。
         _Param ("Factor", Vector) = (0.25, 0.995, 0, 0)
     }
 
@@ -67,6 +71,7 @@ Shader "Custom/URP/waterripple_wave_equation"
 
             half ReadHeight_Input(float2 uv)
             {
+                // Alpha 从 0~1 解回 -1~1，后面所有计算都使用 signed height。
                 return SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv).a * 2.0h - 1.0h;
             }
 
@@ -86,6 +91,8 @@ Shader "Custom/URP/waterripple_wave_equation"
 
                 half prev = ReadHeight_Prev(uv);
 
+                // 采样四邻域，用它们和中心点做一个简单 Laplacian。
+                // _Stride 由 RTManager 设置为 1 / textureSize。
                 half prevL = ReadHeight_Prev(uv + float2(-_Stride.x, 0));
                 half prevR = ReadHeight_Prev(uv + float2( _Stride.x, 0));
                 half prevT = ReadHeight_Prev(uv + float2(0,  _Stride.y));
@@ -98,12 +105,15 @@ Shader "Custom/URP/waterripple_wave_equation"
                     + (prevL + prevR + prevT + prevB - prev * 4.0h) * _Param.x
                     - prevPrev;
 
+                // Brush 输入作为外力注入本帧高度。
                 value += ReadHeight_Input(uv);
 
+                // 衰减避免波一直保持能量。
                 value *= _Param.y;
 
                 value = clamp(value, -1.0h, 1.0h);
                 
+                // 输出继续沿用水波 RT 协议：RGB 保持默认法线，A 保存新高度。
                 half encodedHeight = value * 0.5h + 0.5h;
 
                 return half4(0.5h, 0.5h, 1.0h, encodedHeight);

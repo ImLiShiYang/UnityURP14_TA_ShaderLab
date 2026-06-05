@@ -1,40 +1,26 @@
 using UnityEngine;
-using UnityEngine.Serialization;
-using UnityEngine.Scripting.APIUpdating;
 
 /// <summary>
-/// 水波 RT 调试绑定器。
-///
-/// 用途：
-/// 1. 从 WaterRippleRTManager 里取出 CurrentBrushRT / AccumA / AccumB。
-/// 2. 把选中的 RT 传给 WaterRippleTextureDebugUI 显示。
-/// 3. 避免继续使用 Footprint / TextureDebugUI 旧名字，防止和脚印、雪地调试工具重名。
+/// Binds one of the water ripple render textures to WaterRippleTextureDebugUI.
 /// </summary>
-[MovedFrom(false, null, null, "FootprintTextureDebugBinder")]
 public class WaterRippleTextureDebugBinder : MonoBehaviour
 {
     public enum Source
     {
         CurrentBrushRT,
-        AccumA,
-        AccumB,
         CurrentFrameRT,
         PrevFrameRT,
         PrevPrevFrameRT
     }
 
     [Header("Water Ripple")]
-    [Tooltip("水波 RT 管理器。如果为空，会自动查找场景中的 WaterRippleRTManager。")]
-    [FormerlySerializedAs("manager")]
     public WaterRippleRTManager waterRippleManager;
 
     [Header("Viewer")]
-    [Tooltip("水波 RT 调试 UI。")]
-    [FormerlySerializedAs("viewer")]
     public WaterRippleTextureDebugUI waterRippleViewer;
 
-    [Tooltip("选择要查看的水波 RT。CurrentBrushRT = 当前帧 Brush；AccumA = 当前累积结果；AccumB = 写入缓冲。")]
-    public Source source = Source.AccumA;
+    [Tooltip("PrevFrameRT is the newest completed wave texture and is what the receiver material samples.")]
+    public Source source = Source.PrevFrameRT;
 
     private void Awake()
     {
@@ -52,8 +38,7 @@ public class WaterRippleTextureDebugBinder : MonoBehaviour
         if (waterRippleViewer == null)
             return;
 
-        Texture tex = GetWaterRippleTexture();
-        waterRippleViewer.SetTexture(tex);
+        waterRippleViewer.SetTexture(GetWaterRippleTexture());
         waterRippleViewer.SetTitle("Water Ripple / " + source);
     }
 
@@ -67,21 +52,15 @@ public class WaterRippleTextureDebugBinder : MonoBehaviour
             case Source.CurrentBrushRT:
                 return waterRippleManager.CurrentBrushRT;
 
-            case Source.AccumA:
-                return waterRippleManager.AccumA;
-
-            case Source.AccumB:
-                return waterRippleManager.AccumB;
-            
             case Source.CurrentFrameRT:
                 return waterRippleManager.CurrentFrameRT;
 
             case Source.PrevFrameRT:
                 return waterRippleManager.PrevFrameRT;
-            
+
             case Source.PrevPrevFrameRT:
                 return waterRippleManager.PrevPrevFrameRT;
-            
+
             default:
                 return null;
         }

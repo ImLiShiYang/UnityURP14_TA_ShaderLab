@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using UnityEngine.Scripting.APIUpdating;
 
 /// <summary>
 /// 水波 RT 屏幕调试窗口。
@@ -11,12 +10,11 @@ using UnityEngine.Scripting.APIUpdating;
 /// RGB = encoded normal，默认约为 (0.5, 0.5, 1)
 /// A   = signed height，0.5 表示无高度变化，低于 0.5 表示下陷，高于 0.5 表示隆起。
 ///
-/// 因此查看 AccumA 时，推荐优先使用：
+/// 因此查看水波结果时，推荐优先使用：
 /// - WaterSignedHeightA：直接看 signed height，0.5 灰色表示无变化。
 /// - WaterHeightMagnitudeA：看绝对波纹强度，黑色表示无变化。
 /// - WaterComposite：把法线和高度变化合成到一起看。
 /// </summary>
-[MovedFrom(false, null, null, "TextureDebugUI")]
 public class WaterRippleTextureDebugUI : MonoBehaviour
 {
     public enum DebugMode

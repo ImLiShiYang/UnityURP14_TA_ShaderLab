@@ -2,13 +2,15 @@ Shader "WaterRipple/URP_WaterRippleBrush_NormalHeightSeparate"
 {
     Properties
     {
+        // Brush 负责把一次水波输入写进 CurrentBrushRT。
+        // RGB 存法线扰动，A 存 signed height：0.5 为无波动。
         _NormalTex ("WaterRipple Normal Tex", 2D) = "bump" {}
         _HeightTex ("WaterRipple Height Tex R", 2D) = "black" {}
 
         _NormalStrength ("Normal Strength", Range(0, 2)) = 1
         _HeightStrength ("Height Strength", Range(0, 2)) = 1
 
-        // 你的图是：水波纹黑、背景白，所以默认反转。
+        // 高度方向反了时再打开；默认认为黑色更低，白色更高。
         _InvertHeight ("Invert Height", Float) = 0
     }
 
@@ -73,54 +75,25 @@ Shader "WaterRipple/URP_WaterRippleBrush_NormalHeightSeparate"
 
             half4 Frag(Varyings IN) : SV_Target
             {
-                // 1. 采样 Unity Normal Map。
-                // 注意：这里 _NormalTex 的 Texture Type 必须是 Normal Map。
+                // _NormalTex 必须按 Unity Normal Map 导入，UnpackNormalScale 才能正确解码。
                 half4 packedNormal = SAMPLE_TEXTURE2D(_NormalTex, sampler_NormalTex, IN.uvNormal);
 
-                // 2. 用 Unity/URP 的方式解包 normal。
-                // normalTS 范围是 -1~1。
-                // _NormalStrength 会增强/减弱 xy 法线强度。
+                // 解码到 -1~1，再重新编码到 RT 使用的 0~1 范围。
                 half3 normalTS = UnpackNormalScale(packedNormal, _NormalStrength);
-
-                // 3. 重新编码回 0~1。
-                // 因为你的 CurrentBrushRT / AccumA 协议是：
-                // RGB = encoded normal
-                // A   = mask / depression
                 half3 normalRGB = normalTS * 0.5h + 0.5h;
 
-                half3 neutralNormal = half3(0.5h, 0.5h, 1.0h);
-
-                // 4. 采样高度图。
-                // HeightTex 新语义：
-                // 0.5 = 原始地面
-                // <0.5 = 下陷
-                // >0.5 = 泥边隆起
+                // HeightTex.r 也转成 signed height：-1 下陷，0 无波动，+1 隆起。
                 half heightR = SAMPLE_TEXTURE2D(_HeightTex, sampler_HeightTex, IN.uvHeight).r;
-
-                // 转成 signed height:
-                // -1 = 最深下陷
-                //  0 = 原始地面
-                // +1 = 最高隆起
                 half signedHeight = (heightR - 0.5h) * 2.0h;
-
-                // 如果你的高度图黑色是下陷、白色是隆起，_InvertHeight 应该设为 0。
-                // 如果方向反了，再设为 1。
                 signedHeight = lerp(signedHeight, -signedHeight, saturate(_InvertHeight));
-
-                // 强度缩放
                 signedHeight = clamp(signedHeight * _HeightStrength, -1.0h, 1.0h);
 
-                // 影响强度。
-                // 下陷和隆起都算有效影响。
                 half influence = abs(signedHeight);
 
-                // 没有高度变化的地方不写入 CurrentBrushRT。
+                // 没有波动的透明区域直接丢弃，避免整张 Brush Quad 覆盖 CurrentBrushRT。
                 clip(influence - 0.001h);
 
-                // 重新编码到 A 通道：
-                // signedHeight = -1 -> A = 0
-                // signedHeight =  0 -> A = 0.5
-                // signedHeight = +1 -> A = 1
+                // A 通道写回编码高度，后面的波动方程只读取这个通道。
                 half encodedSignedHeight = signedHeight * 0.5h + 0.5h;
 
                 return half4(normalRGB, encodedSignedHeight);

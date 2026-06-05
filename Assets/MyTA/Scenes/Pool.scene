@@ -1455,18 +1455,13 @@ MonoBehaviour:
   waterRippleCamera: {fileID: 1610204700}
   receiverMaterial: {fileID: 2100000, guid: 388217bde9459814890ff06fb20f5039, type: 2}
   receiverPlane: {fileID: 0}
-  accumulateMaterial: {fileID: 2100000, guid: 5f911169f35a6dd41b0a49e9184bb9d8, type: 2}
   waveEquationMaterial: {fileID: 2100000, guid: 8473c7695d6848349b48634eefe4a1c1,
     type: 2}
   textureSize: 256
   radius: 8
   cameraHeight: 20
-  reduceVal: 0
-  edgeSoftness: 25
-  m_textureIdx: 0
   waveFactor: 0.25
   waveDecay: 0.995
-  waveInputStrength: 1
 --- !u!4 &1885597482
 Transform:
   m_ObjectHideFlags: 0

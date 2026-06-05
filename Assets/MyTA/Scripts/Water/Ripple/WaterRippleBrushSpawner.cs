@@ -1,7 +1,5 @@
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Serialization;
-using UnityEngine.Scripting.APIUpdating;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -17,9 +15,8 @@ using UnityEditor;
 /// 4. 从脚掌中心向下 Raycast。
 /// 5. 在地面 hit.point 附近生成 WaterRippleBrush。
 /// 6. WaterRippleCamera 拍到 Brush 后写入 CurrentBrushRT。
-/// 7. WaterRippleRenderFeature 再把 CurrentBrushRT 累积进 AccumA。
+/// 7. WaterRippleRenderFeature 再把 CurrentBrushRT 作为输入推进波动方程。
 /// </summary>
-[MovedFrom(false, null, null, "FootprintBrushSpawner")]
 public class WaterRippleBrushSpawner : MonoBehaviour
 {
     // ============================================================
@@ -141,7 +138,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     public float footSideOffset = 0.18f;
 
     [Tooltip("整体水波贴图方向修正。如果水波横着或反了，可以填 90 / -90 / 180。")]
-    [FormerlySerializedAs("footprintYawOffset")]
     public float waterRippleYawOffset = 0f;
 
     [Header("Fine Tune Local Offset")]
@@ -168,11 +164,9 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     public bool overrideBrushScale = true;
 
     [Tooltip("走路水波尺寸。X=脚宽，Y=脚长。Quad 默认在 XY 平面。")]
-    [FormerlySerializedAs("walkFootprintSize")]
     public Vector2 walkWaterRippleSize = new Vector2(0.22f, 0.36f);
 
     [Tooltip("跑步水波尺寸。")]
-    [FormerlySerializedAs("runFootprintSize")]
     public Vector2 runWaterRippleSize = new Vector2(0.24f, 0.40f);
 
     [Header("Brush Lifetime")]
@@ -222,7 +216,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // ============================================================
 
     [Header("Debug Gizmos")]
-    [FormerlySerializedAs("showFootprintDebugGizmos")]
     public bool showWaterRippleDebugGizmos = true;
 
     [Tooltip("显示左脚调试数据。")]
@@ -445,18 +438,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     public void SpawnRightWaterRipple()
     {
         SpawnRightWaterRipple(false);
-    }
-
-    [System.Obsolete("Use SpawnLeftWaterRipple instead. 保留它是为了兼容旧动画事件。")]
-    public void SpawnLeftFootprint()
-    {
-        SpawnLeftWaterRipple();
-    }
-
-    [System.Obsolete("Use SpawnRightWaterRipple instead. 保留它是为了兼容旧动画事件。")]
-    public void SpawnRightFootprint()
-    {
-        SpawnRightWaterRipple();
     }
 
     // [说明] 左脚内部生成入口。
@@ -769,17 +750,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         // [说明] Brush 是写 RT 的临时数据，不应该参与场景真实光照和投影。
         SetupBrushMaterial(brush, normalTex, heightTex);
         DisableBrushShadows(brush);
-
-        // [说明] 通知 RT 管理器“这一帧确实生成了新 Brush”。
-        // [说明] 后续 RenderFeature / RT 管理器可以据此决定是否需要累积当前 Brush。
-        if (WaterRippleRTManager.Active != null)
-        {
-            WaterRippleRTManager.Active.NotifyWaterRippleSpawned();
-        }
-        else
-        {
-            Debug.LogWarning("[WaterRippleBrushSpawner] WaterRippleRTManager.Active is null.");
-        }
 
         if (logSpawn)
         {

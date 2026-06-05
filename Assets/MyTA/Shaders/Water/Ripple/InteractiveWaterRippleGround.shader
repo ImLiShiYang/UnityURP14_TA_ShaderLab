@@ -141,7 +141,7 @@ Shader "WaterRipple/InteractiveWaterRippleGround"
         //      真正的立体感主要还是来自法线。
         //
         //      如果泥边看不清，优先检查：
-        //          1. AccumA 的 Alpha 里 A > 0.5 的白色泥边是否存在
+        //          1. _WaterRippleTex 的 Alpha 里 A > 0.5 的白色泥边是否存在
         //          2. rimMask 是否明显
         //          3. 这里的强度是否太低
         // ============================================================
