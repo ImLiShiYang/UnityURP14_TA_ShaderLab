@@ -48,19 +48,13 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // Spawn Mode
     // ============================================================
 
-    [Header("Spawn Mode")]
+    [Header("移动距离模式")]
     [Tooltip("true = 按移动距离自动生成；false = 只通过动画事件生成。")]
     public bool useDistanceSpawn = false;
 
     [Tooltip("距离模式下，每隔多远生成一个水波。动画事件模式下不用。")]
     public float stepDistance = 0.7f;
 
-
-    // ============================================================
-    // Movement Guard
-    // ============================================================
-
-    [Header("Movement Guard")]
     [Tooltip("是否要求玩家有移动输入才允许生成水波。")]
     public bool requireMoveInput = true;
 
@@ -173,6 +167,25 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     [Tooltip("Brush 存活时间。需要至少活到 WaterRippleCamera 渲染一次。")]
     public float brushLife = 0.12f;
 
+    [Header("每一帧生成脚印水波")]
+    [Tooltip("开启后，脚贴近水面且正在移动时，每帧在脚下生成一个短生命周期水波输入点。")]
+    public bool enableEveryFrameFootRipple = true;
+
+    [Tooltip("开启每帧水波后，是否屏蔽原来的动画事件/距离模式落脚水波，避免两套输入叠在一起。")]
+    public bool blockStepRippleWhenEveryFrameEnabled = true;
+
+    [Tooltip("每帧水波输入点尺寸。X=宽度，Y=长度。建议比普通脚印小。")]
+    public Vector2 everyFrameWaterRippleSize = new Vector2(0.12f, 0.16f);
+
+    [Tooltip("每帧水波输入点的生命周期。一定要比普通 brushLife 短，否则会重复注入太多帧。")]
+    public float everyFrameBrushLife = 0.035f;
+
+    [Tooltip("同一只脚移动距离小于这个值时，不生成新的每帧水波，避免站立抖动时疯狂写入。")]
+    public float everyFrameMinMoveDistance = 0.025f;
+
+    [Tooltip("脚掌中心距离命中表面超过这个高度时，认为脚已经离开水面，不生成每帧水波。")]
+    public float maxEveryFrameFootHeightFromSurface = 0.16f;
+
 
     // ============================================================
     // Textures
@@ -284,6 +297,11 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     private float lastLeftFootTime = -999f;
     private float lastRightFootTime = -999f;
 
+    private bool hasLastLeftEveryFramePoint;
+    private bool hasLastRightEveryFramePoint;
+    private Vector3 lastLeftEveryFramePoint;
+    private Vector3 lastRightEveryFramePoint;
+
     private static readonly int NormalTexID = Shader.PropertyToID("_NormalTex");
     private static readonly int HeightTexID = Shader.PropertyToID("_HeightTex");
     private static readonly int NormalStrengthID = Shader.PropertyToID("_NormalStrength");
@@ -375,48 +393,41 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             lastStepPos = characterRoot.position;
     }
 
-    // [说明] Update 只负责“距离生成模式”。
-    // [说明] 如果 useDistanceSpawn=false，水波应该由 Animation Event 调用 SpawnLeftWaterRipple / SpawnRightWaterRipple 生成。
+    // [说明] Update 同时支持两种模式：
+    // [说明] 1. 原来的距离生成模式：走够一步生成一次水波。
+    // [说明] 2. 新增的每帧脚下水波：脚贴近水面且移动时，每帧生成一个短生命周期输入点。
     private void Update()
     {
         // [说明] useDistanceSpawn=true 时，不依赖动画事件，而是按角色移动距离自动交替生成左右脚水波。
+        // [说明] 注意：开启每帧水波并且 blockStepRippleWhenEveryFrameEnabled=true 时，下面的 SpawnLeft/Right 会被内部拦截，避免叠加。
         if (useDistanceSpawn)
         {
-            // [说明] 距离模式至少需要角色根节点和 Brush prefab。
-            // [说明] 缺任何一个都无法计算移动距离或实例化水波 Brush。
-            if (characterRoot == null || brushPrefab == null)
-                return;
+            if (characterRoot != null && brushPrefab != null)
+            {
+                // [说明] 只比较 XZ 平面距离，忽略 Y 轴高度。
+                Vector3 flatNow = new Vector3(characterRoot.position.x, 0f, characterRoot.position.z);
+                Vector3 flatLast = new Vector3(lastStepPos.x, 0f, lastStepPos.z);
 
-            // [说明] 只比较 XZ 平面距离，忽略 Y 轴高度。
-            // [说明] 这样角色上下坡、地面高低变化时，不会因为高度变化误判为走了一步。
-            Vector3 flatNow = new Vector3(characterRoot.position.x, 0f, characterRoot.position.z);
-            Vector3 flatLast = new Vector3(lastStepPos.x, 0f, lastStepPos.z);
+                if (Vector3.Distance(flatNow, flatLast) >= stepDistance)
+                {
+                    if (nextLeftFoot)
+                        SpawnLeftWaterRipple(false);
+                    else
+                        SpawnRightWaterRipple(false);
 
-            // [说明] 没有走够 stepDistance 就不生成水波。
-            // [说明] 这个判断相当于一个简单的“步频模拟器”。
-            if (Vector3.Distance(flatNow, flatLast) < stepDistance)
-                return;
-
-            // [说明] 走够一步后，根据 nextLeftFoot 决定生成左脚还是右脚。
-            // [说明] 参数 false 表示不跳过移动保护，仍然会走 CanSpawnWaterRipple 和同脚冷却判断。
-            if (nextLeftFoot)
-                SpawnLeftWaterRipple(false);
-            else
-                SpawnRightWaterRipple(false);
-
-            // [说明] 生成完成后，把本次角色位置记录为下一次距离判断的起点。
-            // [说明] 同时翻转 nextLeftFoot，让下一步换另一只脚。
-            lastStepPos = characterRoot.position;
-            nextLeftFoot = !nextLeftFoot;
+                    lastStepPos = characterRoot.position;
+                    nextLeftFoot = !nextLeftFoot;
+                }
+            }
         }
-        // [说明] 非距离生成模式下，Update 不做事。
-        // [说明] 此时水波入口应该来自动画事件，而不是每帧距离检测。
-        else
+
+        // [说明] 新增：每帧检测左右脚。
+        // [说明] 只有脚正在移动、贴近水面、且通过移动保护时，才会实际生成 Brush。
+        if (enableEveryFrameFootRipple)
         {
-            return;
+            UpdateEveryFrameFootRipple(true, leftFoot, leftToes, leftNormalTex, leftHeightTex);
+            UpdateEveryFrameFootRipple(false, rightFoot, rightToes, rightNormalTex, rightHeightTex);
         }
-
-        
     }
 
 
@@ -429,7 +440,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     /// </summary>
     public void SpawnLeftWaterRipple()
     {
-        SpawnLeftWaterRipple(false);
+        if (!useDistanceSpawn)
+            SpawnLeftWaterRipple(false);
     }
 
     /// <summary>
@@ -437,13 +449,19 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     /// </summary>
     public void SpawnRightWaterRipple()
     {
-        SpawnRightWaterRipple(false);
+        if (!useDistanceSpawn)
+            SpawnRightWaterRipple(false);
     }
 
     // [说明] 左脚内部生成入口。
     // [说明] 动画事件和距离模式最终都会走到这里，再统一调用 SpawnWaterRipple。
     private void SpawnLeftWaterRipple(bool ignoreMovementGuard)
     {
+        // [说明] 开启每帧水波时，默认屏蔽原来的落脚/距离水波，避免两套输入叠在一起。
+        // [说明] ignoreMovementGuard=true 一般来自调试按键，仍然允许手动测试。
+        if (!ignoreMovementGuard && enableEveryFrameFootRipple && blockStepRippleWhenEveryFrameEnabled)
+            return;
+
         // [说明] 不忽略移动保护时，先检查当前是否真的允许生成水波。
         // [说明] 例如刚开局、没移动输入、MoveSpeed 太低、prefab 未绑定时都会被拦截。
         if (!ignoreMovementGuard && !CanSpawnWaterRipple())
@@ -462,6 +480,10 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // [说明] 右脚内部生成入口，逻辑和左脚一致，只是传入右脚骨骼和右脚贴图。
     private void SpawnRightWaterRipple(bool ignoreMovementGuard)
     {
+        // [说明] 开启每帧水波时，默认屏蔽原来的落脚/距离水波，避免两套输入叠在一起。
+        if (!ignoreMovementGuard && enableEveryFrameFootRipple && blockStepRippleWhenEveryFrameEnabled)
+            return;
+
         if (!ignoreMovementGuard && !CanSpawnWaterRipple())
             return;
 
@@ -474,6 +496,135 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
         SpawnWaterRipple(false,rightFoot,rightToes,rightNormalTex,rightHeightTex);
 
+    }
+
+
+    // ============================================================
+    // Every Frame Foot Ripple
+    // ============================================================
+
+    // [说明] 每帧脚下水波入口。
+    // [说明] 这个函数不会一次性补很多插值点，而是“当前帧只生成当前脚位置的一个输入点”。
+    private void UpdateEveryFrameFootRipple(bool isLeftFoot,Transform footTransform,Transform toeTransform,Texture normalTex,Texture heightTex)
+    {
+        if (!CanSpawnWaterRipple())
+        {
+            ClearEveryFrameFootRippleState(isLeftFoot);
+            return;
+        }
+
+        Vector3 footSamplePosition = GetEveryFrameFootSamplePosition(isLeftFoot, footTransform, toeTransform);
+
+        if (isLeftFoot)
+        {
+            if (hasLastLeftEveryFramePoint)
+            {
+                float moveDistance = Vector3.Distance(lastLeftEveryFramePoint, footSamplePosition);
+
+                if (moveDistance < everyFrameMinMoveDistance)
+                    return;
+            }
+
+            bool spawned = SpawnWaterRipple(
+                true,
+                footTransform,
+                toeTransform,
+                normalTex,
+                heightTex,
+                everyFrameWaterRippleSize,
+                everyFrameBrushLife,
+                true
+            );
+
+            if (spawned)
+            {
+                lastLeftEveryFramePoint = footSamplePosition;
+                hasLastLeftEveryFramePoint = true;
+            }
+            else
+            {
+                ClearEveryFrameFootRippleState(true);
+            }
+        }
+        else
+        {
+            if (hasLastRightEveryFramePoint)
+            {
+                float moveDistance = Vector3.Distance(lastRightEveryFramePoint, footSamplePosition);
+
+                if (moveDistance < everyFrameMinMoveDistance)
+                    return;
+            }
+
+            bool spawned = SpawnWaterRipple(
+                false,
+                footTransform,
+                toeTransform,
+                normalTex,
+                heightTex,
+                everyFrameWaterRippleSize,
+                everyFrameBrushLife,
+                true
+            );
+
+            if (spawned)
+            {
+                lastRightEveryFramePoint = footSamplePosition;
+                hasLastRightEveryFramePoint = true;
+            }
+            else
+            {
+                ClearEveryFrameFootRippleState(false);
+            }
+        }
+    }
+
+    // [说明] 取得每帧水波用的脚掌采样点。
+    // [说明] 这里和 SpawnWaterRipple 内部的脚掌中心计算保持一致，方便用它做“是否移动足够距离”的判断。
+    private Vector3 GetEveryFrameFootSamplePosition(
+        bool isLeftFoot,
+        Transform footTransform,
+        Transform toeTransform)
+    {
+        Vector3 footBonePosition;
+
+        if (footTransform != null)
+        {
+            footBonePosition = footTransform.position;
+        }
+        else
+        {
+            Vector3 right = characterRoot != null ? characterRoot.right : Vector3.right;
+            right.y = 0f;
+
+            if (right.sqrMagnitude < 0.0001f)
+                right = Vector3.right;
+
+            right.Normalize();
+
+            float side = isLeftFoot ? -footSideOffset : footSideOffset;
+            Vector3 rootPosition = characterRoot != null ? characterRoot.position : transform.position;
+            footBonePosition = rootPosition + right * side;
+        }
+
+        if (toeTransform != null)
+            return Vector3.Lerp(footBonePosition, toeTransform.position, toeBlend);
+
+        return footBonePosition;
+    }
+
+    // [说明] 脚离开水面、Raycast 失败、移动条件不满足时，清空上一帧状态。
+    // [说明] 这样下一次重新接触水面时，会先记录位置，不会和旧位置硬连。
+    private void ClearEveryFrameFootRippleState(bool isLeftFoot)
+    {
+        if (isLeftFoot)
+        {
+            hasLastLeftEveryFramePoint = false;
+        }
+        else
+        {
+            hasLastRightEveryFramePoint = false;
+        }
     }
 
 
@@ -558,11 +709,20 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     // [说明] 核心生成函数。
     // [说明] 这里完成：脚掌中心计算、Raycast 贴地、朝向计算、Brush 实例化、贴图参数设置、通知 RT 管理器。
-    private void SpawnWaterRipple(bool isLeftFoot,Transform footTransform,Transform toeTransform,Texture normalTex,Texture heightTex)
+    // [说明] 返回 true 表示本次确实生成了 Brush；返回 false 表示被移动保护、Raycast、高度、SurfaceMask 等条件拦截。
+    private bool SpawnWaterRipple(
+        bool isLeftFoot,
+        Transform footTransform,
+        Transform toeTransform,
+        Texture normalTex,
+        Texture heightTex,
+        Vector2? overrideBrushSize = null,
+        float? overrideBrushLife = null,
+        bool rejectIfFootTooHighFromSurface = false)
     {
         // [说明] 没有 Brush prefab 就无法生成临时投影 Quad，直接退出。
         if (brushPrefab == null)
-            return;
+            return false;
 
         // [说明] 将 bool 类型的左右脚转换成 Debug 用枚举，方便后面缓存和绘制 Gizmos。
         DebugFootSide debugFootSide = isLeftFoot ? DebugFootSide.Left : DebugFootSide.Right;
@@ -576,8 +736,10 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         if (footTransform != null)
         {
             footBonePosition = footTransform.position;
-        // [说明] 如果没有绑定 Foot 骨骼，则使用角色左右方向加 footSideOffset 做一个 fallback 落点。
+            // footBonePosition = characterRoot.position;
+            // Debug.LogWarning("使用根节点位置");
         }
+        // [说明] 如果没有绑定 Foot 骨骼，则使用角色左右方向加 footSideOffset 做一个 fallback 落点。
         else
         {
             Vector3 right = characterRoot.right;
@@ -601,11 +763,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         if (hasToe)
         {
             toeBonePosition = toeTransform.position;
-            footCenterPosition = Vector3.Lerp(
-                footBonePosition,
-                toeBonePosition,
-                toeBlend
-            );
+            footCenterPosition = Vector3.Lerp(footBonePosition,toeBonePosition,toeBlend);
+            
         }
 
         // [说明] Raycast 从脚掌中心上方开始，向下检测地面。
@@ -614,12 +773,14 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         float totalRayDistance = rayStartHeight + rayDistance;
         Vector3 rayEnd = rayOrigin + Vector3.down * totalRayDistance;
 
-        // [说明] 当前水波大小会根据走路/跑步状态动态选择。
-        Vector2 currentBrushSize = GetCurrentWaterRippleSize();
+        // [说明] 普通落脚水波使用 walk/run 尺寸；每帧水波可以传入更小的 overrideBrushSize。
+        Vector2 currentBrushSize = overrideBrushSize.HasValue
+            ? overrideBrushSize.Value
+            : GetCurrentWaterRippleSize();
 
         // [说明] 没有射到地面就不生成水波。
         // [说明] 同时缓存失败数据，方便 Scene 视图里看到 Raycast 为什么没命中。
-        if (!Physics.Raycast(rayOrigin, Vector3.down,out RaycastHit hit,totalRayDistance,groundMask,QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, totalRayDistance, groundMask, QueryTriggerInteraction.Ignore))
         {
             CacheBrushDebugData(
                 debugFootSide,
@@ -647,11 +808,31 @@ public class WaterRippleBrushSpawner : MonoBehaviour
                 );
             }
 
-            return;
+            return false;
         }
 
         // [说明] Raycast 命中的地面法线，用来让 Brush 贴合斜坡或不平整表面。
         Vector3 normal = hit.normal;
+
+        // [说明] 每帧划水模式下，脚离表面太高就认为已经离开水面。
+        // [说明] 否则脚在空中摆动时，也可能因为 Raycast 命中地面而持续生成水波。
+        if (rejectIfFootTooHighFromSurface)
+        {
+            float footHeightFromSurface = Vector3.Dot(footCenterPosition - hit.point, normal);
+
+            if (footHeightFromSurface > maxEveryFrameFootHeightFromSurface)
+            {
+                if (logSpawn)
+                {
+                    Debug.Log(
+                        $"[WaterRippleBrushSpawner] Every frame ripple rejected. foot={(isLeftFoot ? "Left" : "Right")}, " +
+                        $"heightFromSurface={footHeightFromSurface}"
+                    );
+                }
+
+                return false;
+            }
+        }
 
         // [说明] 表面遮罩用于限制水波只出现在湿地、雪地、泥地等指定区域。
         if (useSurfaceMask && wetlandMask != null)
@@ -661,13 +842,13 @@ public class WaterRippleBrushSpawner : MonoBehaviour
                 if (logSpawn)
                     Debug.Log("[WaterRippleBrushSpawner] Surface mask rejected waterRipple.");
 
-                return;
+                return false;
             }
         }
 
         // [说明] 计算脚尖方向，并投影到地面切平面上。
         // [说明] 这样水波朝向会贴着地面，而不是带有脚骨骼的上下倾斜。
-        Vector3 forwardOnSurface = GetFootForwardOnSurface(footTransform,toeTransform,normal);
+        Vector3 forwardOnSurface = GetFootForwardOnSurface(footTransform, toeTransform, normal);
 
         // [说明] 根据脚尖方向和地面法线算出水波的右方向，用于左右局部偏移。
         Vector3 rightOnSurface = Vector3.Cross(forwardOnSurface, normal).normalized;
@@ -720,8 +901,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
         // [说明] 实例化临时 Brush。
         // [说明] 它不会长期留在场景里，只需要存活到 WaterRippleCamera 拍到它。
-        GameObject brush = Instantiate(brushPrefab,spawnPosition,spawnRotation);
-        
+        GameObject brush = Instantiate(brushPrefab, spawnPosition, spawnRotation);
 
         // [说明] Brush 必须放到 WaterRippleBrush Layer。
         // [说明] RenderFeature 会用 LayerMask 只渲染这一层，避免把其他物体拍进 CurrentBrushRT。
@@ -736,7 +916,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             Debug.LogWarning($"[WaterRippleBrushSpawner] 找不到 Layer: {brushLayerName}");
         }
 
-        // [说明] 覆盖 prefab 缩放后，水波大小完全由 walkWaterRippleSize / runWaterRippleSize 控制。
+        // [说明] 覆盖 prefab 缩放后，水波大小完全由 currentBrushSize 控制。
         if (overrideBrushScale)
         {
             brush.transform.localScale = new Vector3(
@@ -759,9 +939,11 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             );
         }
 
-        // [说明] Brush 只需要短暂存在。
-        // [说明] brushLife 要保证至少覆盖一次 WaterRippleCamera 渲染，否则可能还没拍到就被销毁。
-        Destroy(brush, brushLife);
+        // [说明] 普通脚印用 brushLife；每帧水波用更短的 everyFrameBrushLife，避免一个 Brush 连续多帧重复注入。
+        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
+        Destroy(brush, Mathf.Max(0.001f, life));
+
+        return true;
     }
 
     // [说明] 表面遮罩兼容旧/新命名，只要求目标组件提供 bool CanSpawnAt(Vector3) 方法。

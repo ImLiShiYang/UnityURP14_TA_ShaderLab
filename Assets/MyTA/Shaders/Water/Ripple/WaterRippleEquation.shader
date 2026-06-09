@@ -7,6 +7,8 @@ Shader "Custom/URP/waterripple_wave_equation"
         _MainTex ("Input", 2D) = "gray" {}
         _PrevTex ("Prev", 2D) = "gray" {}
         _PrevPrevTex ("PrevPrev", 2D) = "gray" {}
+        _PrevOffset ("Prev Offset", Vector) = (0,0,0,0)
+        _PrevPrevOffset ("Prev Prev Offset", Vector) = (0,0,0,0)
 
         // x = wave factor，控制扩散速度；y = decay，控制能量衰减。
         _Param ("Factor", Vector) = (0.25, 0.995, 0, 0)
@@ -59,6 +61,8 @@ Shader "Custom/URP/waterripple_wave_equation"
             CBUFFER_START(UnityPerMaterial)
                 float4 _Param;
                 float2 _Stride;
+                float2 _PrevOffset;
+                float2 _PrevPrevOffset;
             CBUFFER_END
 
             Varyings Vert(Attributes IN)
@@ -75,36 +79,47 @@ Shader "Custom/URP/waterripple_wave_equation"
                 return SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv).a * 2.0h - 1.0h;
             }
 
+            half UVInside(float2 uv)
+            {
+                return step(0.0h, uv.x) *
+                       step(0.0h, uv.y) *
+                       step(uv.x, 1.0h) *
+                       step(uv.y, 1.0h);
+            }
+
             half ReadHeight_Prev(float2 uv)
             {
-                return SAMPLE_TEXTURE2D(_PrevTex, sampler_PrevTex, uv).a * 2.0h - 1.0h;
+                half inside = UVInside(uv);
+                half height = SAMPLE_TEXTURE2D(_PrevTex, sampler_PrevTex, uv).a * 2.0h - 1.0h;
+                return height * inside;
             }
 
             half ReadHeight_PrevPrev(float2 uv)
             {
-                return SAMPLE_TEXTURE2D(_PrevPrevTex, sampler_PrevPrevTex, uv).a * 2.0h - 1.0h;
+                half inside = UVInside(uv);
+                half height = SAMPLE_TEXTURE2D(_PrevPrevTex, sampler_PrevPrevTex, uv).a * 2.0h - 1.0h;
+                return height * inside;
             }
 
             half4 Frag(Varyings IN) : SV_Target
             {
                 float2 uv = IN.uv;
+                float2 prevUV = uv - _PrevOffset;
+                float2 prevPrevUV = uv - _PrevPrevOffset;
 
-                half prev = ReadHeight_Prev(uv);
+                half prev = ReadHeight_Prev(prevUV);
 
                 // 采样四邻域，用它们和中心点做一个简单 Laplacian。
                 // _Stride 由 RTManager 设置为 1 / textureSize。
-                half prevL = ReadHeight_Prev(uv + float2(-_Stride.x, 0));
-                half prevR = ReadHeight_Prev(uv + float2( _Stride.x, 0));
-                half prevT = ReadHeight_Prev(uv + float2(0,  _Stride.y));
-                half prevB = ReadHeight_Prev(uv + float2(0, -_Stride.y));
+                half prevL = ReadHeight_Prev(prevUV + float2(-_Stride.x, 0));
+                half prevR = ReadHeight_Prev(prevUV + float2( _Stride.x, 0));
+                half prevT = ReadHeight_Prev(prevUV + float2(0,  _Stride.y));
+                half prevB = ReadHeight_Prev(prevUV + float2(0, -_Stride.y));
 
-                half prevPrev = ReadHeight_PrevPrev(uv);
+                half prevPrev = ReadHeight_PrevPrev(prevPrevUV);
 
-                half value =
-                    prev * 2.0h
-                    + (prevL + prevR + prevT + prevB - prev * 4.0h) * _Param.x
-                    - prevPrev;
-
+                half value =prev * 2.0h+ (prevL + prevR + prevT + prevB - prev * 4.0h) * _Param.x- prevPrev;
+                
                 // Brush 输入作为外力注入本帧高度。
                 value += ReadHeight_Input(uv);
 

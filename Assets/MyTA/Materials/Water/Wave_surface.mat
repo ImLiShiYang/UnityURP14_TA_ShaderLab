@@ -112,14 +112,14 @@ Material:
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _Metallic: 0
-    - _NormalStrength: 0.75
+    - _NormalStrength: 1
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _RefractionStrength: 0.018
+    - _RefractionStrength: 0
     - _RefractionTintStrength: 0.28
-    - _RefractionWaveStrength: 1.2
+    - _RefractionWaveStrength: 0
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -135,7 +135,7 @@ Material:
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _DeepColor: {r: 0.02, g: 0.24999997, b: 0.45, a: 0.65}
+    - _DeepColor: {r: 0.54294235, g: 0.67171067, b: 0.7830189, a: 0.65}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FoamColor: {r: 1, g: 1, b: 1, a: 1}
     - _FresnelColor: {r: 0.65, g: 0.95, b: 1, a: 1}

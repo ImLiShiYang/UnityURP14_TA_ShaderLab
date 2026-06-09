@@ -48,17 +48,20 @@ public class WaterRippleRTManager : MonoBehaviour
 
     private RenderTexture currentBrushRT;
     private readonly RenderTexture[] waveFrames = new RenderTexture[3];
+    private readonly Vector3[] waveFrameCenters = new Vector3[3];
 
     private int waveFrameIndex;
     private Vector3 lastAlignedCenter;
+    private Vector3 alignedCenterThisFrame;
     private Vector2 appliedOffsetThisFrame;
+    private Vector2 prevPrevOffsetThisFrame;
     private bool initialized;
 
     public bool Initialized => initialized;
     public RenderTexture CurrentBrushRT => currentBrushRT;
-    public RenderTexture CurrentFrameRT => waveFrames[waveFrameIndex];
-    public RenderTexture PrevFrameRT => waveFrames[(waveFrameIndex + 2) % waveFrames.Length];
-    public RenderTexture PrevPrevFrameRT => waveFrames[(waveFrameIndex + 1) % waveFrames.Length];
+    public RenderTexture CurrentFrameRT => waveFrames[CurrentFrameIndex];
+    public RenderTexture PrevFrameRT => waveFrames[PrevFrameIndex];
+    public RenderTexture PrevPrevFrameRT => waveFrames[PrevPrevFrameIndex];
     public Camera WaterRippleCamera => waterRippleCamera;
     public Material WaveEquationMaterial => waveEquationMaterial;
     public Color ClearColor => NormalClearColor;
@@ -67,12 +70,18 @@ public class WaterRippleRTManager : MonoBehaviour
 
     private static readonly int PrevTexID = Shader.PropertyToID("_PrevTex");
     private static readonly int PrevPrevTexID = Shader.PropertyToID("_PrevPrevTex");
+    private static readonly int PrevOffsetID = Shader.PropertyToID("_PrevOffset");
+    private static readonly int PrevPrevOffsetID = Shader.PropertyToID("_PrevPrevOffset");
     private static readonly int ParamID = Shader.PropertyToID("_Param");
     private static readonly int StrideID = Shader.PropertyToID("_Stride");
 
     private static readonly int WaterRippleTexID = Shader.PropertyToID("_WaterRippleTex");
     private static readonly int WaterRippleRectID = Shader.PropertyToID("_WaterRippleRect");
     private static readonly int EnableWaterRippleID = Shader.PropertyToID("_EnableWaterRipple");
+
+    private int CurrentFrameIndex => waveFrameIndex;
+    private int PrevFrameIndex => (waveFrameIndex + 2) % waveFrames.Length;
+    private int PrevPrevFrameIndex => (waveFrameIndex + 1) % waveFrames.Length;
 
 #if UNITY_EDITOR
     private const string DefaultWaveEquationMaterialPath = "Assets/MyTA/Materials/Water/Wave_equation.mat";
@@ -139,6 +148,13 @@ public class WaterRippleRTManager : MonoBehaviour
         waterRippleCamera.aspect = 1f;
 
         lastAlignedCenter = target.position;
+        alignedCenterThisFrame = lastAlignedCenter;
+        appliedOffsetThisFrame = Vector2.zero;
+        prevPrevOffsetThisFrame = Vector2.zero;
+
+        for (int i = 0; i < waveFrameCenters.Length; i++)
+            waveFrameCenters[i] = lastAlignedCenter;
+
         initialized = true;
 
         UpdateWaterRippleCamera();
@@ -151,10 +167,18 @@ public class WaterRippleRTManager : MonoBehaviour
         if (waveEquationMaterial == null)
             return;
 
-        appliedOffsetThisFrame = GetCurrentOffset();
+        Vector3 targetCenter = target != null ? target.position : lastAlignedCenter;
+        Vector3 prevCenter = waveFrameCenters[PrevFrameIndex];
+        Vector3 prevPrevCenter = waveFrameCenters[PrevPrevFrameIndex];
+
+        appliedOffsetThisFrame = GetSnappedOffset(prevCenter, targetCenter);
+        alignedCenterThisFrame = GetAlignedCenter(prevCenter, targetCenter, appliedOffsetThisFrame);
+        prevPrevOffsetThisFrame = GetSnappedOffset(prevPrevCenter, alignedCenterThisFrame);
 
         waveEquationMaterial.SetTexture(PrevTexID, PrevFrameRT);
         waveEquationMaterial.SetTexture(PrevPrevTexID, PrevPrevFrameRT);
+        waveEquationMaterial.SetVector(PrevOffsetID, new Vector4(appliedOffsetThisFrame.x, appliedOffsetThisFrame.y, 0f, 0f));
+        waveEquationMaterial.SetVector(PrevPrevOffsetID, new Vector4(prevPrevOffsetThisFrame.x, prevPrevOffsetThisFrame.y, 0f, 0f));
         waveEquationMaterial.SetVector(StrideID, new Vector4(1f / textureSize, 1f / textureSize, 0f, 0f));
         waveEquationMaterial.SetVector(ParamID, new Vector4(waveFactor, waveDecay, 0f, 0f));
     }
@@ -166,13 +190,9 @@ public class WaterRippleRTManager : MonoBehaviour
 
     public void FinishWaveFrame()
     {
-        if (target != null)
-        {
-            float diameter = radius * 2f;
-            lastAlignedCenter.x -= appliedOffsetThisFrame.x * diameter;
-            lastAlignedCenter.z -= appliedOffsetThisFrame.y * diameter;
-            lastAlignedCenter.y = target.position.y;
-        }
+        int latestFrameIndex = PrevFrameIndex;
+        waveFrameCenters[latestFrameIndex] = alignedCenterThisFrame;
+        lastAlignedCenter = alignedCenterThisFrame;
 
         UpdateReceiverMaterial();
     }
@@ -188,7 +208,16 @@ public class WaterRippleRTManager : MonoBehaviour
             ClearRT(waveFrames[i], NormalClearColor);
 
         if (target != null)
+        {
             lastAlignedCenter = target.position;
+            alignedCenterThisFrame = lastAlignedCenter;
+
+            for (int i = 0; i < waveFrameCenters.Length; i++)
+                waveFrameCenters[i] = lastAlignedCenter;
+        }
+
+        appliedOffsetThisFrame = Vector2.zero;
+        prevPrevOffsetThisFrame = Vector2.zero;
 
         UpdateReceiverMaterial();
     }
@@ -198,12 +227,18 @@ public class WaterRippleRTManager : MonoBehaviour
         if (target == null)
             return Vector2.zero;
 
+        return GetSnappedOffset(lastAlignedCenter, target.position);
+    }
+
+    private Vector2 GetSnappedOffset(Vector3 historyCenter, Vector3 targetCenter)
+    {
         float diameter = radius * 2f;
-        Vector3 center = target.position;
+        if (diameter <= 0.0001f)
+            return Vector2.zero;
 
         Vector2 uvOffset = new Vector2(
-            (lastAlignedCenter.x - center.x) / diameter,
-            (lastAlignedCenter.z - center.z) / diameter
+            (historyCenter.x - targetCenter.x) / diameter,
+            (historyCenter.z - targetCenter.z) / diameter
         );
 
         float texel = 1f / textureSize;
@@ -211,6 +246,17 @@ public class WaterRippleRTManager : MonoBehaviour
         uvOffset.y = Mathf.Round(uvOffset.y / texel) * texel;
 
         return uvOffset;
+    }
+
+    private Vector3 GetAlignedCenter(Vector3 historyCenter, Vector3 targetCenter, Vector2 appliedOffset)
+    {
+        float diameter = radius * 2f;
+
+        return new Vector3(
+            historyCenter.x - appliedOffset.x * diameter,
+            targetCenter.y,
+            historyCenter.z - appliedOffset.y * diameter
+        );
     }
 
     private RenderTexture CreateRT(string rtName, int index = -1)
