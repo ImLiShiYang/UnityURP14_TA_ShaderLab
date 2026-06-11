@@ -1,0 +1,112 @@
+#pragma kernel GenerateStaticSpectrum
+#pragma kernel GenerateGaussNoise
+
+#include "../Include/Noise.hlsl"
+
+float2 WindDirection;
+float WindSpeed;
+float Gravity;
+float Fetch;
+float Amplitude;
+float Length;
+float Depth;
+uint Size;
+RWTexture2D<float2> GaussNoise;
+RWTexture2D<float2> H0;
+RWTexture2D<float4> Frequency;
+
+float2 ComplexMul(float2 a, float2 b)
+{
+    return a.xy * b.x + a.yx * float2(-b.y, b.y);
+}
+
+float FrequencyDerivative(float k, float g, float frequency)
+{
+    float th = tanh(min(k, 20));
+    float ch = cosh(k);
+    return g * (k / (ch * ch) + th) / (frequency * 2);
+}
+
+float TMACorrection(float omega, float g, float depth)
+{
+    float omegaH = omega * sqrt(depth / g);
+    if (omegaH <= 1)
+        return 0.5 * omegaH * omegaH;
+    if (omegaH < 2)
+        return 1.0 - 0.5 * (2.0 - omegaH) * (2.0 - omegaH);
+    return 1;
+}
+
+float JONSWAP(float omega, float g, float depth, float fetch, float windSpeed)
+{
+    float sigma2;
+    float g2 = g * g;
+    float peakOmega = 22 * pow(g2 / (windSpeed * fetch), 0.33);
+    float alpha = 0.076 * pow(windSpeed * windSpeed / (fetch * g), 0.22);
+    if (omega <= peakOmega)
+        sigma2 = 0.0049;
+    else
+        sigma2 = 0.0081;
+    float r = exp(-(omega - peakOmega) * (omega - peakOmega)
+        / (2 * sigma2 * sigma2 * peakOmega * peakOmega));
+	   
+    float oneOverOmega2 = 1 / omega;
+    oneOverOmega2 *= oneOverOmega2;
+    float peakOmegaOverOmega2 = peakOmega * peakOmega * oneOverOmega2;
+    return TMACorrection(omega, g, depth) * alpha * g2
+        * oneOverOmega2 * oneOverOmega2 / omega
+        * exp(-1.25 * peakOmegaOverOmega2 * peakOmegaOverOmega2)
+        * pow(3.3, r);
+}
+
+float DonelanBannerBeta(float x)
+{
+    if (x < 0.95)
+        return 2.61 * pow(abs(x), 1.3);
+    if (x < 1.6)
+        return 2.28 * pow(abs(x), -1.3);
+    float p = -0.4 + 0.8393 * exp(-0.567 * log(x * x));
+    return pow(10, p);
+}
+
+float DonelanBanner(float theta, float omega, float peakOmega)
+{
+    float beta = DonelanBannerBeta(omega / peakOmega);
+    float sech = 1 / cosh(beta * theta);
+    return beta / (2 * tanh(beta * 3.1416)) * sech * sech;
+}
+
+[numthreads(8,8,1)]
+void GenerateStaticSpectrum (uint3 id : SV_DispatchThreadID)
+{
+	float deltaK = 2 * PI / Length;
+	float2 k = (float2(id.xy) - (Size >> 1)) * deltaK;
+	float kLength = length(k);
+	
+    if (kLength > 1e-5 && kLength < 20)
+    {
+        float kAngle = atan2(k.y, k.x);
+        float omega = sqrt(Gravity * kLength * tanh(min(kLength * Depth, 20)));
+        Frequency[id.xy] = float4(k, 1 / kLength, omega);
+        float dOmegadk = FrequencyDerivative(kLength * Depth, Gravity, omega);
+
+        float spectrum = Amplitude * JONSWAP(omega, Gravity, Depth, Fetch, WindSpeed)
+                * DonelanBanner(kAngle, omega, WindSpeed * 0.855f * Gravity);
+        H0[id.xy] = float2(GaussNoise[id.xy].x, GaussNoise[id.xy].y)
+            * sqrt(2 * spectrum * abs(dOmegadk) / kLength * deltaK * deltaK);
+    }
+    else
+    {
+        H0[id.xy] = 0;
+        Frequency[id.xy] = float4(0, 0, 0, 1);
+    }
+}
+
+[numthreads(8,8,1)]
+void GenerateGaussNoise (uint3 id : SV_DispatchThreadID)
+{
+    float root = sqrt(-2 * log(1e-6 + MurmurHash(id.xy, 1) / float(0xffffffff)));      // Avoid log(0)
+    float phase = 2 * PI * MurmurHash(id.xy, 2) / float(0xffffffff);
+    GaussNoise[id.xy] = RandN(root, phase);
+}
+

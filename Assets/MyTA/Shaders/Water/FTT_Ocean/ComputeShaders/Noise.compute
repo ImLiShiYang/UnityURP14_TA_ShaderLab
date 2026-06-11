@@ -1,0 +1,162 @@
+#pragma kernel WorleyNoise2D
+#pragma kernel WorleyNoise3D
+#pragma kernel PerlinNoise2D
+#pragma kernel PerlinNoise3D
+#pragma kernel PerlinWorley2D
+#pragma kernel PerlinWorley3D
+#pragma kernel SimplexNoise2D
+#include "../Include/Noise.hlsl"
+
+uint3 Size;
+uint Seed;
+uint Octaves;
+float Frequency;
+float Persistence;
+float Lacunarity;
+bool Wrap;
+RWTexture2D<float> Noise2D;
+RWTexture3D<float> Noise3D;
+
+[numthreads(8,8,1)]
+void PerlinNoise2D (uint3 id : SV_DispatchThreadID)
+{
+    float value = 0.0;
+    float amplitude = 1.0;
+    float currentFrequency = float(Frequency);
+    float currentSeed = Seed;
+    for (uint i = 0; i < Octaves; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint2 border = Wrap ? ceil(Size.xy * currentFrequency) : 0xffffffff;
+        value += PerlinNoise2(id.xy * currentFrequency, currentSeed, border) * amplitude;
+        amplitude *= Persistence;
+        currentFrequency *= Lacunarity;
+    }
+    Noise2D[id.xy] = 0.5 * (value + 1);
+}
+
+[numthreads(8,8,1)]
+void PerlinNoise3D (uint3 id : SV_DispatchThreadID)
+{
+    float value = 0.0;
+    float amplitude = 1.0;
+    float currentFrequency = Frequency;
+    uint currentSeed = Seed;
+    for (uint i = 0; i < Octaves; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint3 border = Wrap ? ceil(Size * currentFrequency) : 0xffffffff;
+        value += PerlinNoise3(id * currentFrequency, currentSeed, border) * amplitude;
+        amplitude *= Persistence;
+        currentFrequency *= Lacunarity;
+    }
+    Noise3D[id] = 0.5 * (value + 1);
+}
+
+[numthreads(8,8,1)]
+void WorleyNoise2D (uint3 id : SV_DispatchThreadID)
+{
+    float value = 0.0;
+    float amplitude = 1.0;
+    float totalAmplitude = 0.0;
+    float currentFrequency = float(Frequency);
+    float currentSeed = Seed;
+    for (uint i = 0; i < Octaves; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint2 border = Wrap ? ceil(Size * currentFrequency) - 1 : 0xffffffff;
+        value += (1 - WorleyNoise2(id.xy * currentFrequency, currentSeed, border)) * amplitude;
+        totalAmplitude += amplitude;
+        amplitude *= Persistence;
+        currentFrequency *= Lacunarity;
+    }
+    Noise2D[id.xy] = value / totalAmplitude;
+}
+
+[numthreads(8,8,1)]
+void WorleyNoise3D (uint3 id : SV_DispatchThreadID)
+{
+    float value = 0.0;
+    float amplitude = 1.0;
+    float totalAmplitude = 0.0;
+    float currentFrequency = Frequency;
+    uint currentSeed = Seed;
+    for (uint i = 0; i < Octaves; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint3 border = Wrap ? ceil(Size * currentFrequency) - 1 : 0xffffffff;
+        value += (1 - WorleyNoise3(id * currentFrequency, currentSeed, border)) * amplitude;
+        totalAmplitude += amplitude;
+        amplitude *= Persistence;
+        currentFrequency *= Lacunarity;
+    }
+    Noise3D[id] = value / totalAmplitude;
+}
+
+[numthreads(8,8,1)]
+void PerlinWorley2D (uint3 id : SV_DispatchThreadID)
+{
+    float value_p = 0.0;
+    float value_w = 0.0;
+    float amplitude = 1.0;
+    float totalAmplitude = 0.0;
+    float currentFrequency = float(Frequency);
+    float currentSeed = Seed;
+    for (uint i = 0; i < 2; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint2 border = Wrap ? ceil(Size.xy * currentFrequency) : 0xffffffff;
+        value_p += PerlinNoise2(id.xy * currentFrequency, currentSeed, border) * amplitude;
+        amplitude *= Persistence;
+        totalAmplitude += amplitude;
+        currentFrequency *= Lacunarity;
+    }
+    for (uint i = 0; i < Octaves - 2; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint2 border = Wrap ? ceil(Size.xy * currentFrequency) : 0xffffffff;
+        value_w += (1 - WorleyNoise2(id.xy * currentFrequency, currentSeed, border)) * amplitude;
+        amplitude *= Persistence;
+        totalAmplitude += amplitude;
+        currentFrequency *= Lacunarity;
+    }
+    Noise2D[id.xy] = 0.5 * (value_p + 1) + value_w / totalAmplitude;
+}
+
+[numthreads(8,8,1)]
+void PerlinWorley3D (uint3 id : SV_DispatchThreadID)
+{
+    float value_p = 0.0;
+    float value_w = 0.0;
+    float amplitude = 1.0;
+    float totalAmplitude = 0.0;
+    float currentFrequency = float(Frequency);
+    float currentSeed = Seed;
+    for (uint i = 0; i < 2; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint3 border = Wrap ? ceil(Size * currentFrequency) : 0xffffffff;
+        value_p += PerlinNoise3(id * currentFrequency, currentSeed, border) * amplitude;
+        amplitude *= Persistence;
+        totalAmplitude += amplitude;
+        currentFrequency *= Lacunarity;
+    }
+    for (uint i = 0; i < Octaves - 2; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        uint3 border = Wrap ? ceil(Size * currentFrequency) : 0xffffffff;
+        value_w += (1 - WorleyNoise3(id * currentFrequency, currentSeed, border)) * amplitude;
+        amplitude *= Persistence;
+        totalAmplitude += amplitude;
+        currentFrequency *= Lacunarity;
+    }
+    Noise3D[id] = 0.5 * (value_p + 1) + value_w / totalAmplitude;
+}
+
+[numthreads(8,8,1)]
+void SimplexNoise2D (uint3 id : SV_DispatchThreadID)
+{
+    float value = 0.0;
+    float amplitude = 1.0;
+    float currentFrequency = Frequency;
+    uint currentSeed = Seed;
+    for (uint i = 0; i < Octaves; i++) {
+        currentSeed = MurmurHash(currentSeed);
+        value += SimplexNoise2(id * currentFrequency, currentSeed) * amplitude;
+        amplitude *= Persistence;
+        currentFrequency *= Lacunarity;
+    }
+    Noise2D[id.xy] = 0.5 * (value + 1);
+}

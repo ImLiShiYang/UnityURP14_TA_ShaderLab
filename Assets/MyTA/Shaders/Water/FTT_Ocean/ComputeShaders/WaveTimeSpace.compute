@@ -1,0 +1,61 @@
+#pragma kernel GenerateWave
+#pragma kernel MergeTextures
+#include <UnityShaderVariables.cginc>
+
+uint Size;
+float Lambda;
+RWTexture2D<float2> H0;
+RWTexture2D<float4> Frequency;
+RWTexture2D<float2> DyDxzSpec;
+RWTexture2D<float2> DxDzSpec;
+RWTexture2D<float2> DyzDzzSpec;
+RWTexture2D<float2> DyxDxxSpec;
+RWTexture2D<float4> Displacement;
+RWTexture2D<float4> Derivatives;
+RWTexture2D<float> Turbulence;
+
+float2 ComplexMul(float2 a, float2 b)
+{
+    return a.xy * b.x + a.yx * float2(-b.y, b.y);
+}
+
+[numthreads(8,8,1)]
+void GenerateWave (uint3 id : SV_DispatchThreadID)
+{
+    float4 freq = Frequency[id.xy];
+    float phase = freq.w * _Time.y;
+    float2 exponent = float2(cos(phase), sin(phase));
+    
+    float2 hHat = ComplexMul(exponent, H0[(Size - id.xy) % Size]);
+    hHat = ComplexMul(exponent, H0[id.xy]) + float2(hHat.x, -hHat.y);
+    
+    float2 ihHat = float2(-hHat.y, hHat.x);
+    float2 idxz = freq.x * freq.y * ihHat * freq.z;         // dD(x, z)/dz = kx * kz * hHat / |k|
+    float2 dx = hHat * freq.x * freq.z;                     // D(k) = hHat * k / |k|
+    float2 idz = ihHat * freq.y * freq.z;
+    float2 idxx = freq.x * freq.x * ihHat * freq.z;         // k * k * hHat / |k|
+    float2 idzz = freq.y * freq.y * ihHat * freq.z;
+    float2 dyx = freq.x * ihHat;                            // i * k * hHat
+    float2 dyz = freq.y * ihHat;
+    
+    DyDxzSpec[id.xy] = hHat + idxz;
+    DxDzSpec[id.xy] = dx + idz;      
+    DyxDxxSpec[id.xy] = dyx + idxx;
+    DyzDzzSpec[id.xy] = dyz + idzz;
+}
+
+[numthreads(8,8,1)]
+void MergeTextures (uint3 id : SV_DispatchThreadID)
+{
+    float2 lambda = float2(1, Lambda);
+    float2 DyDxz = DyDxzSpec[id.xy] * lambda;
+    float2 DxDz = DxDzSpec[id.xy] * Lambda;
+    float2 DyxDxx = DyxDxxSpec[id.xy] * lambda;
+    float2 DyzDzz = DyzDzzSpec[id.xy] * lambda;
+	
+    Displacement[id.xy] = float4(DxDz, DyDxz.x, 1);
+    Derivatives[id.xy] = float4(DyxDxx, DyzDzz);
+    float jacobian = (1 + DyxDxx.y) * (1 + DyzDzz.y) - DyDxz.y * DyDxz.y;
+    Turbulence[id.xy] = Turbulence[id.xy] + unity_DeltaTime.x * 0.5 / max(jacobian, 0.5);
+    Turbulence[id.xy] = min(jacobian, Turbulence[id.xy]);
+}

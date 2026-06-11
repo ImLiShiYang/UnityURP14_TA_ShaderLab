@@ -45,5 +45,5 @@ Material:
     - _EnableWaterRipple: 0
     - _WaterRippleSignedDeadZone: 0.005
     m_Colors:
-    - _WaterRippleRect: {r: -13.53125, g: -7.625, b: 2.46875, a: 8.375}
+    - _WaterRippleRect: {r: -8, g: -5.833, b: 8, a: 10.167}
   m_BuildTextureStacks: []

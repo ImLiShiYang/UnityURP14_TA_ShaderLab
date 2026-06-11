@@ -1,0 +1,121 @@
+#pragma kernel Scale
+#pragma kernel Shift
+#pragma kernel Step
+#pragma kernel HorizontalStep
+#pragma kernel VerticalStep
+#pragma kernel BitReverse
+
+static const float PI = 3.1415926;
+
+RWTexture2D<float2> Buffer0;
+RWTexture2D<float2> Buffer1;
+bool PingPong;
+int Operation;
+uint Depth;
+uint2 Size;
+StructuredBuffer<uint> HBitRevIndices;
+StructuredBuffer<uint> VBitRevIndices;
+
+float2 ComplexMul(float2 a, float2 b)
+{
+	return a.xy * b.x + a.yx * float2(-b.y, b.y);
+}
+
+[numthreads(8, 8, 1)]
+void HorizontalStep(uint3 id : SV_DispatchThreadID)
+{
+	uint stride = 1 << Depth;
+	uint2 pos = uint2(id.x + (id.x >> Depth << Depth), id.y);
+	float phase = PI / stride * (pos.x % (stride << 1));
+	float2 w = float2(cos(phase), -Operation * sin(phase));
+
+	if (PingPong)
+	{
+		float2 h00 = Buffer0[pos];
+		float2 h10 = ComplexMul(Buffer0[uint2(pos.x + stride, pos.y)], w);
+		Buffer1[pos] = h00 + h10;
+		Buffer1[uint2(pos.x + stride, pos.y)] = h00 - h10;
+	}
+	else
+	{
+		float2 h00 = Buffer1[pos];
+		float2 h10 = ComplexMul(Buffer1[uint2(pos.x + stride, pos.y)], w);
+		Buffer0[pos] = h00 + h10;
+		Buffer0[uint2(pos.x + stride, pos.y)] = h00 - h10;
+	}
+}
+
+[numthreads(8, 8, 1)]
+void VerticalStep(uint3 id : SV_DispatchThreadID)
+{
+	uint stride = 1 << Depth;
+	uint2 pos = uint2(id.x, id.y + (id.y >> Depth << Depth));
+	float phase = PI / stride * (pos.y % (stride << 1));
+	float2 w = float2(cos(phase), -Operation * sin(phase));
+
+	if (PingPong)
+	{
+		float2 h00 = Buffer0[pos];
+		float2 h01 = ComplexMul(Buffer0[uint2(pos.x, pos.y + stride)], w);
+		Buffer1[pos] = h00 + h01;
+		Buffer1[uint2(pos.x, pos.y + stride)] = h00 - h01;
+	}
+	else
+	{
+		float2 h00 = Buffer1[pos];
+		float2 h01 = ComplexMul(Buffer1[uint2(pos.x, pos.y + stride)], w);
+		Buffer0[pos] = h00 + h01;
+		Buffer0[uint2(pos.x, pos.y + stride)] = h00 - h01;
+	}
+}
+
+// 2D Fast Fourier Transform implementation of Unity Compute Shader
+[numthreads(8, 8, 1)]
+void Step(uint3 id : SV_DispatchThreadID)
+{
+	uint stride = 1 << Depth;
+	uint2 pos = id.xy + (id.xy >> Depth << Depth);
+	float2 phase = PI / stride * (pos % (stride << 1));
+	float4 w = float4(cos(phase), -Operation * sin(phase));
+
+	if (PingPong)
+	{
+		float2 h00 = Buffer0[pos];
+		float2 h10 = ComplexMul(Buffer0[uint2(pos.x + stride, pos.y)], w.xz);
+		float2 h01 = ComplexMul(Buffer0[uint2(pos.x, pos.y + stride)], w.yw);
+		float2 h11 = ComplexMul(Buffer0[pos + stride], ComplexMul(w.xz, w.yw));
+		Buffer1[pos] = h00 + h10 + h01 + h11;
+		Buffer1[uint2(pos.x + stride, pos.y)] = h00 - h10 + h01 - h11;
+		Buffer1[uint2(pos.x, pos.y + stride)] = h00 + h10 - h01 - h11;
+		Buffer1[pos + stride] = h00 - h10 - h01 + h11;
+	}
+	else
+	{
+		float2 h00 = Buffer1[pos];
+		float2 h10 = ComplexMul(Buffer1[uint2(pos.x + stride, pos.y)], w.xz);
+		float2 h01 = ComplexMul(Buffer1[uint2(pos.x, pos.y + stride)], w.yw);
+		float2 h11 = ComplexMul(Buffer1[pos + stride], ComplexMul(w.xz, w.yw));
+		Buffer0[pos] = h00 + h10 + h01 + h11;
+		Buffer0[uint2(pos.x + stride, pos.y)] = h00 - h10 + h01 - h11;
+		Buffer0[uint2(pos.x, pos.y + stride)] = h00 + h10 - h01 - h11;
+		Buffer0[pos + stride] = h00 - h10 - h01 + h11;
+	}
+}
+
+[numthreads(8, 8, 1)]
+void BitReverse(uint3 id : SV_DispatchThreadID)
+{
+	Buffer1[id.xy] = Buffer0[uint2(HBitRevIndices[id.x], VBitRevIndices[id.y])];
+}
+
+[numthreads(8, 8, 1)]
+void Scale(uint3 id : SV_DispatchThreadID)
+{
+	Buffer0[id.xy] /= Size.x * Size.y;
+}
+
+[numthreads(8, 8, 1)]
+void Shift(uint3 id : SV_DispatchThreadID)
+{
+	Buffer0[id.xy] = Buffer0[id.xy] * (1.0 - 2.0 * ((id.x + id.y) % 2));
+}

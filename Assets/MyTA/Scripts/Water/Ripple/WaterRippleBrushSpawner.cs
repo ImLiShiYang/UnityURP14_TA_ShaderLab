@@ -173,9 +173,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     [Tooltip("开启每帧水波后，是否屏蔽原来的动画事件/距离模式落脚水波，避免两套输入叠在一起。")]
     public bool blockStepRippleWhenEveryFrameEnabled = true;
-
-    [Tooltip("每帧水波输入点尺寸。X=宽度，Y=长度。建议比普通脚印小。")]
-    public Vector2 everyFrameWaterRippleSize = new Vector2(0.12f, 0.16f);
+    
 
     [Tooltip("每帧水波输入点的生命周期。一定要比普通 brushLife 短，否则会重复注入太多帧。")]
     public float everyFrameBrushLife = 0.035f;
@@ -531,7 +529,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
                 toeTransform,
                 normalTex,
                 heightTex,
-                everyFrameWaterRippleSize,
                 everyFrameBrushLife,
                 true
             );
@@ -562,7 +559,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
                 toeTransform,
                 normalTex,
                 heightTex,
-                everyFrameWaterRippleSize,
                 everyFrameBrushLife,
                 true
             );
@@ -716,7 +712,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         Transform toeTransform,
         Texture normalTex,
         Texture heightTex,
-        Vector2? overrideBrushSize = null,
         float? overrideBrushLife = null,
         bool rejectIfFootTooHighFromSurface = false)
     {
@@ -774,9 +769,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         Vector3 rayEnd = rayOrigin + Vector3.down * totalRayDistance;
 
         // [说明] 普通落脚水波使用 walk/run 尺寸；每帧水波可以传入更小的 overrideBrushSize。
-        Vector2 currentBrushSize = overrideBrushSize.HasValue
-            ? overrideBrushSize.Value
-            : GetCurrentWaterRippleSize();
+        Vector2 currentBrushSize = GetCurrentWaterRippleSize();
 
         // [说明] 没有射到地面就不生成水波。
         // [说明] 同时缓存失败数据，方便 Scene 视图里看到 Raycast 为什么没命中。
