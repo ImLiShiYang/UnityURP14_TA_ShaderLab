@@ -56,6 +56,13 @@ public class FootstepEventReceiver : MonoBehaviour
     
     [Tooltip("波纹。")]
     public WaterRippleBrushSpawner waterRippleBrushSpawner;
+
+    [Header("Weapon Water Ripple")]
+    [Tooltip("是否把武器划水动画事件转发给 WaterRippleWeaponEventTrail。")]
+    public bool enableWeaponWaterRipple = true;
+
+    [Tooltip("真正负责检测 WaveDetect 点并生成武器水波的脚本。")]
+    public WaterRippleWeaponEventTrail weaponWaterRipple;
     
     [Header("Debug")]
     public bool logEvent = false;
@@ -86,6 +93,18 @@ public class FootstepEventReceiver : MonoBehaviour
         if(waterRippleBrushSpawner==null)
         {
             waterRippleBrushSpawner=GetComponentInParent<WaterRippleBrushSpawner>();
+        }
+
+        if (weaponWaterRipple == null)
+        {
+            // WaterRippleWeaponEventTrail 可以挂在角色父物体、Animator 物体或子物体上。
+            // 这里尽量自动查找，减少 Inspector 漏绑导致动画事件只接到但没有实际效果。
+            weaponWaterRipple = GetComponentInParent<WaterRippleWeaponEventTrail>();
+        }
+
+        if (weaponWaterRipple == null)
+        {
+            weaponWaterRipple = GetComponentInChildren<WaterRippleWeaponEventTrail>();
         }
     }
 
@@ -162,5 +181,46 @@ public class FootstepEventReceiver : MonoBehaviour
             waterRippleBrushSpawner.SpawnRightWaterRipple();
         }
         
+    }
+
+    public void BeginWeaponWaterRipple()
+    {
+        // 动画事件入口：攻击动作进入划水时间段。
+        // 这个类只负责接收事件并转发，真正检测点的位置判断在 WaterRippleWeaponEventTrail。
+        if (logEvent)
+        {
+            Debug.Log("[FootstepEventReceiver] BeginWeaponWaterRipple", this);
+        }
+
+        if (enableWeaponWaterRipple && weaponWaterRipple != null)
+        {
+            weaponWaterRipple.BeginWeaponWaterRipple();
+        }
+    }
+
+    public void EndWeaponWaterRipple()
+    {
+        // 动画事件入口：攻击动作离开划水时间段。
+        if (logEvent)
+        {
+            Debug.Log("[FootstepEventReceiver] EndWeaponWaterRipple", this);
+        }
+
+        if (enableWeaponWaterRipple && weaponWaterRipple != null)
+        {
+            weaponWaterRipple.EndWeaponWaterRipple();
+        }
+    }
+
+    public void BeginWaterCut()
+    {
+        // 短别名。动画事件下拉里如果觉得 BeginWeaponWaterRipple 太长，可以用这个。
+        BeginWeaponWaterRipple();
+    }
+
+    public void EndWaterCut()
+    {
+        // 短别名。动画事件下拉里如果觉得 EndWeaponWaterRipple 太长，可以用这个。
+        EndWeaponWaterRipple();
     }
 }

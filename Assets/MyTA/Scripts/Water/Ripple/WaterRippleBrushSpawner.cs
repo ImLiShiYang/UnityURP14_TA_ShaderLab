@@ -1000,6 +1000,91 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         return forward.normalized;
     }
 
+    /// <summary>
+    /// 给武器/外部系统使用的水波 Brush 生成入口。
+    /// 这里不做脚步骨骼计算，只接收一个已经确定好的水面点和方向，
+    /// 然后生成一个临时 Brush，交给 WaterRippleCamera 拍进水波 RT。
+    /// </summary>
+    public bool SpawnWaterRippleBrushAtSurface(
+        Vector3 surfacePosition,
+        Vector3 surfaceNormal,
+        Vector3 forward,
+        Vector2 brushSize,
+        GameObject brushPrefabOverride = null,
+        Texture normalTex = null,
+        Texture heightTex = null,
+        float? overrideBrushLife = null,
+        bool checkSurfaceMask = true,
+        float strengthMultiplier = 1f)
+    {
+        // 武器可以使用自己的 Brush prefab；不填时复用脚步水波的默认 brushPrefab。
+        GameObject sourceBrushPrefab = brushPrefabOverride != null ? brushPrefabOverride : brushPrefab;
+
+        if (sourceBrushPrefab == null)
+            return false;
+
+        // 默认水面法线朝上，避免外部传入零向量导致 Quaternion 计算异常。
+        Vector3 normal = surfaceNormal.sqrMagnitude > 0.0001f ? surfaceNormal.normalized : Vector3.up;
+
+        // 复用原本脚步水波的表面遮罩逻辑：如果区域不允许生成水波，就直接跳过。
+        if (checkSurfaceMask && useSurfaceMask && wetlandMask != null && !CanSurfaceSpawnAt(surfacePosition))
+            return false;
+
+        // Brush 的长边方向要贴在水面上，不能带有上下倾斜分量。
+        Vector3 forwardOnSurface = Vector3.ProjectOnPlane(forward, normal);
+
+        if (forwardOnSurface.sqrMagnitude < 0.0001f && characterRoot != null)
+            forwardOnSurface = Vector3.ProjectOnPlane(characterRoot.forward, normal);
+
+        if (forwardOnSurface.sqrMagnitude < 0.0001f)
+            forwardOnSurface = Vector3.ProjectOnPlane(Vector3.forward, normal);
+
+        forwardOnSurface.Normalize();
+
+        Vector3 spawnPosition = surfacePosition + normal * surfaceOffset;
+        Quaternion spawnRotation = Quaternion.LookRotation(-normal, forwardOnSurface);
+        spawnRotation = Quaternion.AngleAxis(waterRippleYawOffset, normal) * spawnRotation;
+
+        // 临时 Brush 只活很短时间，被水波摄像机拍到后就销毁。
+        GameObject brush = Instantiate(sourceBrushPrefab, spawnPosition, spawnRotation);
+
+        int brushLayer = LayerMask.NameToLayer(brushLayerName);
+        if (brushLayer >= 0)
+        {
+            SetLayerRecursively(brush, brushLayer);
+        }
+        else
+        {
+            Debug.LogWarning($"[WaterRippleBrushSpawner] 找不到 Layer: {brushLayerName}", this);
+        }
+
+        if (overrideBrushScale)
+        {
+            // X/Y 对应 Quad 的宽和长。武器划水通常传入细长尺寸。
+            brush.transform.localScale = new Vector3(
+                Mathf.Max(0.001f, brushSize.x),
+                Mathf.Max(0.001f, brushSize.y),
+                1f
+            );
+        }
+
+        SetupBrushMaterial(brush, normalTex, heightTex, strengthMultiplier);
+        DisableBrushShadows(brush);
+
+        if (logSpawn)
+        {
+            Debug.Log(
+                $"[WaterRippleBrushSpawner] 生成武器 Brush。位置={spawnPosition}，法线={normal}，朝向={forwardOnSurface}，强度倍率={strengthMultiplier}",
+                this
+            );
+        }
+
+        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
+        Destroy(brush, Mathf.Max(0.001f, life));
+
+        return true;
+    }
+
 
     // ============================================================
     // Brush Setup
@@ -1007,8 +1092,12 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     // [说明] 给 Brush 的所有 Renderer 设置材质参数。
     // [说明] 使用 MaterialPropertyBlock 可以避免实例化材质，减少运行时材质副本。
-    private void SetupBrushMaterial(GameObject brush, Texture normalTex, Texture heightTex)
+    private void SetupBrushMaterial(GameObject brush, Texture normalTex, Texture heightTex, float strengthMultiplier = 1f)
     {
+        // strengthMultiplier 只影响这一次生成出来的临时 Brush。
+        // 脚步水波不传这个参数，会使用默认值 1，保持原来的效果。
+        float safeStrengthMultiplier = Mathf.Max(0f, strengthMultiplier);
+
         // [说明] prefab 可能包含多个 Renderer，因此这里递归获取所有子 Renderer。
         Renderer[] renderers = brush.GetComponentsInChildren<Renderer>();
 
@@ -1028,8 +1117,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
             // [说明] 这些参数控制 Brush shader 对法线和高度的解释。
             // [说明] 如果水波凹凸方向反了，优先检查 invertHeight。
-            mpb.SetFloat(NormalStrengthID, normalStrength);
-            mpb.SetFloat(HeightStrengthID, heightStrength);
+            mpb.SetFloat(NormalStrengthID, normalStrength * safeStrengthMultiplier);
+            mpb.SetFloat(HeightStrengthID, heightStrength * safeStrengthMultiplier);
             mpb.SetFloat(InvertHeightID, invertHeight);
 
             r.SetPropertyBlock(mpb);
