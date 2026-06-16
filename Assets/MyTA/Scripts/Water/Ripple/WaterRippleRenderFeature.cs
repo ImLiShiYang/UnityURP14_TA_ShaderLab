@@ -130,7 +130,7 @@ public class WaterRippleRenderFeature : ScriptableRendererFeature
             DrawingSettings drawingSettings = CreateDrawingSettings(shaderTagIds, ref renderingData, sortingCriteria);
             context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref filteringSettings);
 
-            if (settings.updateWave)
+            if (settings.updateWave && manager.ShouldAdvanceWaveThisRender())
             {
                 manager.SetupWaveEquationMaterial();
                 cmd.Blit(currentBrushRT, currentFrameRT, waveEquationMaterial);

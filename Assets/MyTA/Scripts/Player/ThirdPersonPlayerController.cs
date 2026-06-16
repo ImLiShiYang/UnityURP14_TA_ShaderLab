@@ -46,6 +46,8 @@ public class ThirdPersonPlayerController : MonoBehaviour
     // 用来保存角色的垂直方向速度，主要用于重力计算
     private Vector3 _verticalVelocity;
 
+    private PlayerAttack _playerAttack;
+
     /// <summary>
     /// Unity 生命周期方法。
     /// 
@@ -67,6 +69,8 @@ public class ThirdPersonPlayerController : MonoBehaviour
         {
             animator = GetComponentInChildren<Animator>();
         }
+
+        _playerAttack = GetComponent<PlayerAttack>();
     }
 
     /// <summary>
@@ -78,7 +82,12 @@ public class ThirdPersonPlayerController : MonoBehaviour
     private void Update()
     {
         // 处理水平移动和角色转向
-        Move();
+        bool attackRootMotionActive = _playerAttack != null && _playerAttack.IsAttackRootMotionActive;
+
+        if (!attackRootMotionActive)
+        {
+            Move();
+        }
 
         // 处理垂直方向的重力
         ApplyGravity();
@@ -178,6 +187,13 @@ public class ThirdPersonPlayerController : MonoBehaviour
     {
         if (animator == null)
             return;
+
+        if (_playerAttack != null && _playerAttack.IsAttackRootMotionActive)
+        {
+            HasMoveInput = false;
+            animator.SetFloat(MoveSpeedHash, 0f, 0.05f, Time.deltaTime);
+            return;
+        }
 
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");

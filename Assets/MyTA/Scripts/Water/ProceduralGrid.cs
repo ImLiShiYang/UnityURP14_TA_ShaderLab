@@ -2,6 +2,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 // RequireComponent 的作用：
 // 只要这个脚本挂到某个 GameObject 上，Unity 会自动确保这个物体上有 MeshFilter 和 MeshRenderer。
 //
@@ -10,9 +14,9 @@ using UnityEngine;
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
 public class ProceduralGrid : MonoBehaviour
 {
-    // Awake 会在游戏开始运行时调用一次。
+    // Start 会在游戏开始运行后调用一次。
     // 这里调用 Generate()，表示运行时自动生成一张网格。
-    void Awake()
+    void Start()
     {
         Generate();
     }
@@ -23,8 +27,32 @@ public class ProceduralGrid : MonoBehaviour
     // 注意：OnValidate 只在编辑器里很常用，方便你不运行游戏也能看到网格变化。
     void OnValidate()
     {
+#if UNITY_EDITOR
+        EditorApplication.delayCall -= GenerateInEditor;
+        EditorApplication.delayCall += GenerateInEditor;
+#else
+        Generate();
+#endif
+    }
+
+#if UNITY_EDITOR
+    void OnDisable()
+    {
+        EditorApplication.delayCall -= GenerateInEditor;
+    }
+
+    void GenerateInEditor()
+    {
+        EditorApplication.delayCall -= GenerateInEditor;
+
+        if (this == null)
+        {
+            return;
+        }
+
         Generate();
     }
+#endif
 
     // 每个顶点的颜色。
     // 如果材质或 Shader 使用 vertex color，就能看到这个颜色。

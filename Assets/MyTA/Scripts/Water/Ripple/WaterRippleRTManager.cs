@@ -46,6 +46,12 @@ public class WaterRippleRTManager : MonoBehaviour
     [Range(0.90f, 1.0f)]
     public float waveDecay = 0.995f;
 
+    [Tooltip("waveDecay is authored as the per-step decay at this frame rate, then converted by deltaTime at runtime.")]
+    public float simulationReferenceFrameRate = 60f;
+
+    [Tooltip("How many times per second the wave equation is advanced. This keeps the ripple simulation stable across Game view layouts and FPS.")]
+    public float fixedSimulationRate = 180f;
+
     private RenderTexture currentBrushRT;
     private readonly RenderTexture[] waveFrames = new RenderTexture[3];
     private readonly Vector3[] waveFrameCenters = new Vector3[3];
@@ -56,6 +62,7 @@ public class WaterRippleRTManager : MonoBehaviour
     private Vector2 appliedOffsetThisFrame;
     private Vector2 prevPrevOffsetThisFrame;
     private bool initialized;
+    private float simulationAccumulator;
 
     public bool Initialized => initialized;
     public RenderTexture CurrentBrushRT => currentBrushRT;
@@ -156,10 +163,23 @@ public class WaterRippleRTManager : MonoBehaviour
             waveFrameCenters[i] = lastAlignedCenter;
 
         initialized = true;
+        simulationAccumulator = 0f;
 
         UpdateWaterRippleCamera();
         UpdateReceiverMaterial();
         UpdateReceiverPlane();
+    }
+
+    public bool ShouldAdvanceWaveThisRender()
+    {
+        float interval = 1f / Mathf.Max(1f, fixedSimulationRate);
+        simulationAccumulator += Time.deltaTime;
+
+        if (simulationAccumulator < interval)
+            return false;
+
+        simulationAccumulator = Mathf.Repeat(simulationAccumulator, interval);
+        return true;
     }
 
     public void SetupWaveEquationMaterial()
@@ -180,7 +200,10 @@ public class WaterRippleRTManager : MonoBehaviour
         waveEquationMaterial.SetVector(PrevOffsetID, new Vector4(appliedOffsetThisFrame.x, appliedOffsetThisFrame.y, 0f, 0f));
         waveEquationMaterial.SetVector(PrevPrevOffsetID, new Vector4(prevPrevOffsetThisFrame.x, prevPrevOffsetThisFrame.y, 0f, 0f));
         waveEquationMaterial.SetVector(StrideID, new Vector4(1f / textureSize, 1f / textureSize, 0f, 0f));
-        waveEquationMaterial.SetVector(ParamID, new Vector4(waveFactor, waveDecay, 0f, 0f));
+        float simulationDeltaTime = 1f / Mathf.Max(1f, fixedSimulationRate);
+        float decaySteps = simulationDeltaTime * Mathf.Max(1f, simulationReferenceFrameRate);
+        float frameRateIndependentDecay = Mathf.Pow(waveDecay, decaySteps);
+        waveEquationMaterial.SetVector(ParamID, new Vector4(waveFactor, frameRateIndependentDecay, 0f, 0f));
     }
 
     public void AdvanceWaveFrame()
@@ -218,6 +241,7 @@ public class WaterRippleRTManager : MonoBehaviour
 
         appliedOffsetThisFrame = Vector2.zero;
         prevPrevOffsetThisFrame = Vector2.zero;
+        simulationAccumulator = 0f;
 
         UpdateReceiverMaterial();
     }

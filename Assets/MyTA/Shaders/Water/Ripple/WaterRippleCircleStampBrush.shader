@@ -6,12 +6,12 @@ Shader "WaterRipple/WaterRippleCircleStampBrush"
         _NormalTex ("Compatibility Normal Tex", 2D) = "bump" {}
         _HeightTex ("Compatibility Height Tex", 2D) = "gray" {}
 
-        _NormalStrength ("Normal Strength", Range(0, 4)) = 1.0
-        _HeightStrength ("Height Strength", Range(0, 2)) = 1.0
+        _NormalStrength ("Normal Strength", Range(0, 4)) = 2.0
+        _HeightStrength ("Height Strength", Range(0, 2)) = 2.0
         _InvertHeight ("Invert Height", Float) = 0
 
-        _CenterStrength ("Center Strength", Range(-1, 1)) = -0.35
-        _RingStrength ("Ring Strength", Range(-1, 1)) = 0.18
+        _CenterStrength ("Center Strength", Range(-1, 1)) = -0.75
+        _RingStrength ("Ring Strength", Range(-1, 1)) = 0.28
         _InnerRadius ("Inner Radius 01", Range(0.001, 0.5)) = 0.14
         _OuterRadius ("Outer Radius 01", Range(0.001, 0.707)) = 0.42
         _EdgeSoftness ("Edge Softness", Range(0.0001, 0.25)) = 0.02

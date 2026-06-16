@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -8,14 +9,18 @@ using UnityEditor;
 /// <summary>
 /// RT 水波 Brush 生成器。
 ///
-/// 推荐使用方式：
-/// 1. 挂在 Player 根物体上。
-/// 2. Animation Event 调用 SpawnLeftWaterRipple / SpawnRightWaterRipple。
-/// 3. 根据 Foot / Toes 骨骼插值得到脚掌中心。
-/// 4. 从脚掌中心向下 Raycast。
-/// 5. 在地面 hit.point 附近生成 WaterRippleBrush。
-/// 6. WaterRippleCamera 拍到 Brush 后写入 CurrentBrushRT。
-/// 7. WaterRippleRenderFeature 再把 CurrentBrushRT 作为输入推进波动方程。
+/// 这个类本身不直接计算波动方程，也不直接写 RenderTexture。
+/// 它的职责是把“脚步 / 每帧脚下划水 / 武器轨迹”等交互事件，转换成场景里的临时 WaterRippleBrush 物体。
+/// WaterRippleCamera 拍到这些 Brush 后写入 CurrentBrushRT，之后再由 WaterRippleRenderFeature / 水波模拟流程推进波动方程。
+///
+/// 当前支持的输入来源：
+/// 1. Animation Event：走路 / 跑步动画在左脚、右脚落地帧调用 SpawnLeftWaterRipple / SpawnRightWaterRipple。
+/// 2. 距离模式：useDistanceSpawn=true 时，根据角色 XZ 位移距离自动交替生成左右脚水波。
+/// 3. 每帧脚下水波：enableEveryFrameFootRipple=true 时，脚贴近水面且发生位移就持续生成短生命周期 Brush。
+/// 4. 外部系统入口：武器、水面划痕等系统可调用 SpawnWaterRippleBrushAtSurface，在指定水面点生成 Brush。
+///
+/// 推荐挂载位置：Player 根物体。
+/// 常用依赖：Brush Prefab、WaterRippleBrushPool、Animator、ThirdPersonPlayerController、左右脚 Foot / Toes 骨骼。
 /// </summary>
 public class WaterRippleBrushSpawner : MonoBehaviour
 {
@@ -27,6 +32,18 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     [Tooltip("水波 Brush prefab。通常是一个 Quad，材质使用 WaterRipple/URP_WaterRippleBrush_NormalHeightSeparate。")]
     public GameObject brushPrefab;
 
+    [Tooltip("水波 Brush 对象池。建议绑定，避免每帧水波频繁 Instantiate / Destroy。")]
+    public WaterRippleBrushPool brushPool;
+
+    [Tooltip("是否优先使用对象池生成水波 Brush。关闭后会使用 Instantiate / Destroy fallback。")]
+    public bool usePooling = true;
+
+    [Tooltip("没有找到对象池时，运行时自动创建一个子对象池。")]
+    public bool autoCreatePool = true;
+
+    [Tooltip("为额外 Brush prefab 自动创建对象池时，预热多少个 Brush。主要给武器等 override prefab 使用。")]
+    public int autoCreatedExtraPoolPrewarmCount = 32;
+
     [Tooltip("角色根节点。一般是 Player 根物体，用于获取整体朝向。")]
     public Transform characterRoot;
 
@@ -35,6 +52,9 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     [Tooltip("玩家控制器。用于读取 HasMoveInput，避免停止时动画事件残留生成水波。")]
     public ThirdPersonPlayerController playerController;
+
+    [Tooltip("攻击状态组件。用于判断攻击动画期间是否允许每帧脚下水波无视移动输入 / MoveSpeed 限制。")]
+    public PlayerAttack playerAttack;
 
     [Header("Surface Mask")]
     [Tooltip("是否只允许在指定表面生成水波。")]
@@ -167,22 +187,25 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     [Tooltip("Brush 存活时间。需要至少活到 WaterRippleCamera 渲染一次。")]
     public float brushLife = 0.12f;
 
-    [Header("每一帧生成脚印水波")]
-    [Tooltip("开启后，脚贴近水面且正在移动时，每帧在脚下生成一个短生命周期水波输入点。")]
+    [Header("每帧脚下水波")]
+    [Tooltip("开启后，脚贴近水面且脚掌采样点发生位移时，每帧在脚下生成一个短生命周期水波输入点。适合表现脚在水里连续划开的效果。")]
     public bool enableEveryFrameFootRipple = true;
 
-    [Tooltip("开启每帧水波后，是否屏蔽原来的动画事件/距离模式落脚水波，避免两套输入叠在一起。")]
+    [Tooltip("开启每帧水波后，是否屏蔽原来的动画事件 / 距离模式落脚水波，避免两套输入同时写入造成水波过强。")]
     public bool blockStepRippleWhenEveryFrameEnabled = true;
     
 
     [Tooltip("每帧水波输入点的生命周期。一定要比普通 brushLife 短，否则会重复注入太多帧。")]
     public float everyFrameBrushLife = 0.035f;
 
-    [Tooltip("同一只脚移动距离小于这个值时，不生成新的每帧水波，避免站立抖动时疯狂写入。")]
+    [Tooltip("同一只脚距离上一次成功生成点的移动距离小于这个值时，不生成新的每帧水波，避免站立抖动时疯狂写入。")]
     public float everyFrameMinMoveDistance = 0.025f;
 
     [Tooltip("脚掌中心距离命中表面超过这个高度时，认为脚已经离开水面，不生成每帧水波。")]
     public float maxEveryFrameFootHeightFromSurface = 0.16f;
+
+    [Tooltip("攻击动画处于激活状态时，是否允许每帧脚下水波无视移动输入 / MoveSpeed 限制。用于角色攻击时站在水里也能继续产生扰动。")]
+    public bool allowEveryFrameFootRippleDuringAttack = true;
 
 
     // ============================================================
@@ -190,11 +213,17 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // ============================================================
 
     [Header("Left Foot Textures")]
+    [Tooltip("左脚 Brush 使用的法线纹理。为空时使用 Brush 材质自己的默认纹理。")]
     public Texture leftNormalTex;
+
+    [Tooltip("左脚 Brush 使用的高度纹理。通常用来表达水面向下凹陷 / 向上水边的形状。")]
     public Texture leftHeightTex;
 
     [Header("Right Foot Textures")]
+    [Tooltip("右脚 Brush 使用的法线纹理。为空时使用 Brush 材质自己的默认纹理。")]
     public Texture rightNormalTex;
+
+    [Tooltip("右脚 Brush 使用的高度纹理。通常用来表达水面向下凹陷 / 向上水边的形状。")]
     public Texture rightHeightTex;
 
 
@@ -282,6 +311,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     public float debugBrushBoxDepth = 0.025f;
 
     [Header("Debug Log")]
+    [Tooltip("是否打印水波生成 / 拦截日志。调试 Raycast、SurfaceMask、攻击放行、武器 Brush 时可以打开。")]
     public bool logSpawn = false;
 
 
@@ -289,22 +319,29 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // Internal State
     // ============================================================
 
+    // [说明] 距离生成模式使用：记录上一次生成脚步水波时的角色位置，以及下一次应该生成左脚还是右脚。
     private Vector3 lastStepPos;
     private bool nextLeftFoot;
 
+    // [说明] 动画事件 / 距离模式使用：左右脚各自的生成冷却，防止同一只脚连续重复触发。
     private float lastLeftFootTime = -999f;
     private float lastRightFootTime = -999f;
 
+    // [说明] 每帧脚下水波使用：记录上一帧成功生成点，用移动距离过滤站立抖动。
     private bool hasLastLeftEveryFramePoint;
     private bool hasLastRightEveryFramePoint;
     private Vector3 lastLeftEveryFramePoint;
     private Vector3 lastRightEveryFramePoint;
 
+    // [说明] Brush shader 属性 ID 缓存，避免运行时反复用字符串查找属性。
     private static readonly int NormalTexID = Shader.PropertyToID("_NormalTex");
     private static readonly int HeightTexID = Shader.PropertyToID("_HeightTex");
     private static readonly int NormalStrengthID = Shader.PropertyToID("_NormalStrength");
     private static readonly int HeightStrengthID = Shader.PropertyToID("_HeightStrength");
     private static readonly int InvertHeightID = Shader.PropertyToID("_InvertHeight");
+
+    // [说明] 按 Brush prefab 缓存对象池。脚步和武器可以使用不同 prefab，因此需要多 prefab 对象池映射。
+    private readonly Dictionary<GameObject, WaterRippleBrushPool> brushPoolsByPrefab = new Dictionary<GameObject, WaterRippleBrushPool>();
 
     private enum DebugFootSide
     {
@@ -366,7 +403,53 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         if (playerController == null)
             playerController = GetComponentInParent<ThirdPersonPlayerController>();
 
+        // [说明] playerAttack 用来判断攻击窗口。攻击期间如果 allowEveryFrameFootRippleDuringAttack=true，
+        // [说明] 每帧脚下水波可以不受 HasMoveInput / MoveSpeed 的限制。
+        if (playerAttack == null)
+            playerAttack = GetComponentInParent<PlayerAttack>();
+
+        if (playerAttack == null)
+            playerAttack = GetComponentInChildren<PlayerAttack>();
+
+        // [说明] 开启对象池时，优先使用手动绑定的 WaterRippleBrushPool；没绑定则尝试在场景中自动查找。
+        if (usePooling && brushPool == null)
+        {
+#if UNITY_2023_1_OR_NEWER
+            brushPool = FindFirstObjectByType<WaterRippleBrushPool>();
+#else
+            brushPool = FindObjectOfType<WaterRippleBrushPool>();
+#endif
+        }
+
+        // [说明] 如果场景里没有对象池，并且允许自动创建，就在当前物体下创建一个默认脚步 Brush 对象池。
+        if (usePooling && brushPool == null && autoCreatePool && brushPrefab != null)
+        {
+            GameObject poolObject = new GameObject("WaterRippleBrushPool");
+            poolObject.transform.SetParent(transform, false);
+
+            brushPool = poolObject.AddComponent<WaterRippleBrushPool>();
+            brushPool.brushPrefab = brushPrefab;
+            brushPool.brushLayerName = brushLayerName;
+        }
+
+        // [说明] 对象池没有指定 prefab 时，默认使用本脚本的 brushPrefab。
+        if (brushPool != null && brushPool.brushPrefab == null)
+        {
+            brushPool.brushPrefab = brushPrefab;
+        }
+
+        // [说明] 注册默认对象池。后续 SpawnBrushObject 会按 prefab 从 brushPoolsByPrefab 中取对应对象池。
+        if (usePooling && brushPool != null && brushPool.HasPrefab)
+        {
+            brushPool.brushLayerName = brushLayerName;
+            RegisterBrushPool(brushPool.brushPrefab, brushPool);
+
+            if (brushPool.prewarmOnAwake && brushPool.CreatedCount == 0)
+                brushPool.Prewarm();
+        }
+
         // [说明] 如果角色是 Humanoid，并且 Inspector 没手动指定脚骨骼，就从 Animator 自动拿 Foot / Toes。
+        if (animator != null)
         if (animator != null)
         {
             if (leftFoot == null)
@@ -400,7 +483,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         // [说明] 注意：开启每帧水波并且 blockStepRippleWhenEveryFrameEnabled=true 时，下面的 SpawnLeft/Right 会被内部拦截，避免叠加。
         if (useDistanceSpawn)
         {
-            if (characterRoot != null && brushPrefab != null)
+            if (characterRoot != null && HasBrushSource())
             {
                 // [说明] 只比较 XZ 平面距离，忽略 Y 轴高度。
                 Vector3 flatNow = new Vector3(characterRoot.position.x, 0f, characterRoot.position.z);
@@ -505,7 +588,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // [说明] 这个函数不会一次性补很多插值点，而是“当前帧只生成当前脚位置的一个输入点”。
     private void UpdateEveryFrameFootRipple(bool isLeftFoot,Transform footTransform,Transform toeTransform,Texture normalTex,Texture heightTex)
     {
-        if (!CanSpawnWaterRipple())
+        if (!CanSpawnWaterRipple(allowAttackMotion: allowEveryFrameFootRippleDuringAttack))
         {
             ClearEveryFrameFootRippleState(isLeftFoot);
             return;
@@ -630,22 +713,28 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     // [说明] 统一的水波生成条件检查。
     // [说明] 这个函数只判断“能不能生成”，不负责计算位置，也不实例化 Brush。
-    private bool CanSpawnWaterRipple()
+    // [说明] allowAttackMotion=true 时，攻击激活期间可以跳过移动输入 / MoveSpeed 过滤，避免站桩攻击时脚下水波被误拦截。
+    private bool CanSpawnWaterRipple(bool allowAttackMotion = false)
     {
         // [说明] 刚进入场景的一小段时间不允许生成，避免 Animator 初始化或角色落地瞬间误触发水波。
         if (Time.timeSinceLevelLoad < startBlockTime)
             return false;
 
         // [说明] 没有 Brush prefab 或角色根节点时，后面的生成逻辑没有意义，直接拒绝。
-        if (brushPrefab == null || characterRoot == null)
+        if (!HasBrushSource() || characterRoot == null)
             return false;
 
-        // [说明] 如果要求有移动输入，则玩家没有按方向键/摇杆时不生成水波。
-        if (requireMoveInput && playerController != null && !playerController.HasMoveInput)
+        // [说明] 攻击窗口放行：只影响移动输入 / MoveSpeed 过滤，不会跳过 prefab、角色根节点、开局屏蔽等基础检查。
+        bool ignoreMovementGuardsForAttack = allowAttackMotion
+            && playerAttack != null
+            && playerAttack.IsAttackActive;
+
+        // [说明] 如果要求有移动输入，则玩家没有按方向键 / 摇杆时不生成水波；攻击放行时会跳过这个限制。
+        if (!ignoreMovementGuardsForAttack && requireMoveInput && playerController != null && !playerController.HasMoveInput)
             return false;
 
         // [说明] 如果要求 Animator 速度有效，则读取 MoveSpeed 参数，过滤站立、轻微抖动、过渡动画。
-        if (requireAnimatorMoveSpeed && animator != null && HasAnimatorFloat(animator, moveSpeedParam))
+        if (!ignoreMovementGuardsForAttack && requireAnimatorMoveSpeed && animator != null && HasAnimatorFloat(animator, moveSpeedParam))
         {
             float moveSpeed = animator.GetFloat(moveSpeedParam);
 
@@ -715,8 +804,10 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         float? overrideBrushLife = null,
         bool rejectIfFootTooHighFromSurface = false)
     {
+        GameObject sourceBrushPrefab = GetDefaultBrushPrefab();
+
         // [说明] 没有 Brush prefab 就无法生成临时投影 Quad，直接退出。
-        if (brushPrefab == null)
+        if (sourceBrushPrefab == null)
             return false;
 
         // [说明] 将 bool 类型的左右脚转换成 Debug 用枚举，方便后面缓存和绘制 Gizmos。
@@ -768,7 +859,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         float totalRayDistance = rayStartHeight + rayDistance;
         Vector3 rayEnd = rayOrigin + Vector3.down * totalRayDistance;
 
-        // [说明] 普通落脚水波使用 walk/run 尺寸；每帧水波可以传入更小的 overrideBrushSize。
+        // [说明] 当前脚步 Brush 尺寸根据 MoveSpeed 在 walk/run 尺寸之间选择。
+        // [说明] 每帧脚下水波当前复用同一套尺寸，但会使用更短的 overrideBrushLife 来避免持续重复注入。
         Vector2 currentBrushSize = GetCurrentWaterRippleSize();
 
         // [说明] 没有射到地面就不生成水波。
@@ -827,7 +919,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             }
         }
 
-        // [说明] 表面遮罩用于限制水波只出现在湿地、雪地、泥地等指定区域。
+        // [说明] 表面遮罩用于限制水波只出现在水面、湿地、雪地、泥地等指定区域。
         if (useSurfaceMask && wetlandMask != null)
         {
             if (!CanSurfaceSpawnAt(hit.point))
@@ -892,37 +984,24 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             currentBrushSize
         );
 
-        // [说明] 实例化临时 Brush。
-        // [说明] 它不会长期留在场景里，只需要存活到 WaterRippleCamera 拍到它。
-        GameObject brush = Instantiate(brushPrefab, spawnPosition, spawnRotation);
+        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
+        Vector3 brushScale = overrideBrushScale
+            ? new Vector3(currentBrushSize.x, currentBrushSize.y, 1f)
+            : sourceBrushPrefab.transform.localScale;
 
-        // [说明] Brush 必须放到 WaterRippleBrush Layer。
-        // [说明] RenderFeature 会用 LayerMask 只渲染这一层，避免把其他物体拍进 CurrentBrushRT。
-        int brushLayer = LayerMask.NameToLayer(brushLayerName);
+        GameObject brush = SpawnBrushObject(
+            sourceBrushPrefab,
+            spawnPosition,
+            spawnRotation,
+            brushScale,
+            life,
+            normalTex,
+            heightTex,
+            1f
+        );
 
-        if (brushLayer >= 0)
-        {
-            SetLayerRecursively(brush, brushLayer);
-        }
-        else
-        {
-            Debug.LogWarning($"[WaterRippleBrushSpawner] 找不到 Layer: {brushLayerName}");
-        }
-
-        // [说明] 覆盖 prefab 缩放后，水波大小完全由 currentBrushSize 控制。
-        if (overrideBrushScale)
-        {
-            brush.transform.localScale = new Vector3(
-                currentBrushSize.x,
-                currentBrushSize.y,
-                1f
-            );
-        }
-
-        // [说明] 给 Brush Renderer 传入左右脚对应的 NormalTex / HeightTex，并关闭阴影。
-        // [说明] Brush 是写 RT 的临时数据，不应该参与场景真实光照和投影。
-        SetupBrushMaterial(brush, normalTex, heightTex);
-        DisableBrushShadows(brush);
+        if (brush == null)
+            return false;
 
         if (logSpawn)
         {
@@ -932,14 +1011,10 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             );
         }
 
-        // [说明] 普通脚印用 brushLife；每帧水波用更短的 everyFrameBrushLife，避免一个 Brush 连续多帧重复注入。
-        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
-        Destroy(brush, Mathf.Max(0.001f, life));
-
         return true;
     }
 
-    // [说明] 表面遮罩兼容旧/新命名，只要求目标组件提供 bool CanSpawnAt(Vector3) 方法。
+    // [说明] 表面遮罩兼容旧 / 新命名，只要求目标组件提供 bool CanSpawnAt(Vector3) 方法。
     private bool CanSurfaceSpawnAt(Vector3 point)
     {
         if (wetlandMask == null)
@@ -1001,9 +1076,11 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     }
 
     /// <summary>
-    /// 给武器/外部系统使用的水波 Brush 生成入口。
-    /// 这里不做脚步骨骼计算，只接收一个已经确定好的水面点和方向，
-    /// 然后生成一个临时 Brush，交给 WaterRippleCamera 拍进水波 RT。
+    /// 给武器 / 外部系统使用的水波 Brush 生成入口。
+    ///
+    /// 这个入口不做脚步骨骼计算，也不做向下 Raycast。
+    /// 调用方需要提前算好水面点、表面法线、Brush 朝向和 Brush 尺寸。
+    /// 典型调用方是 WaterRippleWeaponEventTrail：它沿剑身检测水面接触点，然后把每个接触点传进这里生成划水 Brush。
     /// </summary>
     public bool SpawnWaterRippleBrushAtSurface(
         Vector3 surfacePosition,
@@ -1017,20 +1094,20 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         bool checkSurfaceMask = true,
         float strengthMultiplier = 1f)
     {
-        // 武器可以使用自己的 Brush prefab；不填时复用脚步水波的默认 brushPrefab。
+        // [说明] 武器可以使用自己的 Brush prefab；不填时复用脚步水波的默认 brushPrefab。
         GameObject sourceBrushPrefab = brushPrefabOverride != null ? brushPrefabOverride : brushPrefab;
 
         if (sourceBrushPrefab == null)
             return false;
 
-        // 默认水面法线朝上，避免外部传入零向量导致 Quaternion 计算异常。
+        // [说明] 默认水面法线朝上，避免外部传入零向量导致 Quaternion 计算异常。
         Vector3 normal = surfaceNormal.sqrMagnitude > 0.0001f ? surfaceNormal.normalized : Vector3.up;
 
-        // 复用原本脚步水波的表面遮罩逻辑：如果区域不允许生成水波，就直接跳过。
+        // [说明] 复用原本脚步水波的表面遮罩逻辑：如果区域不允许生成水波，就直接跳过。
         if (checkSurfaceMask && useSurfaceMask && wetlandMask != null && !CanSurfaceSpawnAt(surfacePosition))
             return false;
 
-        // Brush 的长边方向要贴在水面上，不能带有上下倾斜分量。
+        // [说明] Brush 的长边方向要贴在水面切平面上，不能带有上下倾斜分量。
         Vector3 forwardOnSurface = Vector3.ProjectOnPlane(forward, normal);
 
         if (forwardOnSurface.sqrMagnitude < 0.0001f && characterRoot != null)
@@ -1045,31 +1122,25 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         Quaternion spawnRotation = Quaternion.LookRotation(-normal, forwardOnSurface);
         spawnRotation = Quaternion.AngleAxis(waterRippleYawOffset, normal) * spawnRotation;
 
-        // 临时 Brush 只活很短时间，被水波摄像机拍到后就销毁。
-        GameObject brush = Instantiate(sourceBrushPrefab, spawnPosition, spawnRotation);
+        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
+        Vector3 brushScale = overrideBrushScale
+            ? new Vector3(Mathf.Max(0.001f, brushSize.x), Mathf.Max(0.001f, brushSize.y), 1f)
+            : sourceBrushPrefab.transform.localScale;
 
-        int brushLayer = LayerMask.NameToLayer(brushLayerName);
-        if (brushLayer >= 0)
-        {
-            SetLayerRecursively(brush, brushLayer);
-        }
-        else
-        {
-            Debug.LogWarning($"[WaterRippleBrushSpawner] 找不到 Layer: {brushLayerName}", this);
-        }
+        // [说明] strengthMultiplier 用来让武器划水、重击等输入临时放大 / 缩小法线和高度强度。
+        GameObject brush = SpawnBrushObject(
+            sourceBrushPrefab,
+            spawnPosition,
+            spawnRotation,
+            brushScale,
+            life,
+            normalTex,
+            heightTex,
+            strengthMultiplier
+        );
 
-        if (overrideBrushScale)
-        {
-            // X/Y 对应 Quad 的宽和长。武器划水通常传入细长尺寸。
-            brush.transform.localScale = new Vector3(
-                Mathf.Max(0.001f, brushSize.x),
-                Mathf.Max(0.001f, brushSize.y),
-                1f
-            );
-        }
-
-        SetupBrushMaterial(brush, normalTex, heightTex, strengthMultiplier);
-        DisableBrushShadows(brush);
+        if (brush == null)
+            return false;
 
         if (logSpawn)
         {
@@ -1079,9 +1150,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             );
         }
 
-        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
-        Destroy(brush, Mathf.Max(0.001f, life));
-
         return true;
     }
 
@@ -1090,12 +1158,175 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     // Brush Setup
     // ============================================================
 
+    // [说明] 检查当前是否有可用 Brush 来源。
+    // [说明] 可以直接使用 brushPrefab，也可以使用对象池里的默认 prefab。
+    private bool HasBrushSource()
+    {
+        return brushPrefab != null || (usePooling && brushPool != null && brushPool.HasPrefab);
+    }
+
+    // [说明] 获取默认脚步 Brush prefab。
+    // [说明] 优先使用本脚本绑定的 brushPrefab；没绑定时退回对象池 prefab。
+    private GameObject GetDefaultBrushPrefab()
+    {
+        if (brushPrefab != null)
+            return brushPrefab;
+
+        if (usePooling && brushPool != null && brushPool.HasPrefab)
+            return brushPool.brushPrefab;
+
+        return null;
+    }
+
+    // [说明] 把某个 Brush prefab 和对应对象池登记到字典里。
+    // [说明] 这样脚步 Brush、武器 Brush 等不同 prefab 可以各自复用自己的池。
+    private void RegisterBrushPool(GameObject sourceBrushPrefab, WaterRippleBrushPool pool)
+    {
+        if (sourceBrushPrefab == null || pool == null)
+            return;
+
+        brushPoolsByPrefab[sourceBrushPrefab] = pool;
+    }
+
+    // [说明] 根据本次要生成的 prefab 查找对象池。
+    // [说明] 找不到时，如果允许 autoCreatePool，会为这个 override prefab 创建一个额外对象池。
+    private WaterRippleBrushPool GetPoolForPrefab(GameObject sourceBrushPrefab)
+    {
+        if (!usePooling || sourceBrushPrefab == null)
+            return null;
+
+        if (brushPoolsByPrefab.TryGetValue(sourceBrushPrefab, out WaterRippleBrushPool cachedPool) && cachedPool != null)
+            return cachedPool;
+
+        if (brushPool != null)
+        {
+            if (brushPool.brushPrefab == null)
+            {
+                brushPool.brushPrefab = sourceBrushPrefab;
+
+                if (brushPool.prewarmOnAwake && brushPool.CreatedCount == 0)
+                    brushPool.Prewarm();
+            }
+
+            if (brushPool.brushPrefab == sourceBrushPrefab)
+            {
+                RegisterBrushPool(sourceBrushPrefab, brushPool);
+                return brushPool;
+            }
+        }
+
+        if (!autoCreatePool)
+            return null;
+
+        WaterRippleBrushPool extraPool = CreatePoolForPrefab(sourceBrushPrefab);
+        RegisterBrushPool(sourceBrushPrefab, extraPool);
+
+        return extraPool;
+    }
+
+    // [说明] 为额外 Brush prefab 创建对象池。
+    // [说明] 主要用于武器 / 外部系统传入 brushPrefabOverride，而它和脚步默认 prefab 不同的情况。
+    private WaterRippleBrushPool CreatePoolForPrefab(GameObject sourceBrushPrefab)
+    {
+        GameObject poolObject = new GameObject($"WaterRippleBrushPool_{sourceBrushPrefab.name}");
+        poolObject.transform.SetParent(transform, false);
+
+        WaterRippleBrushPool extraPool = poolObject.AddComponent<WaterRippleBrushPool>();
+        WaterRippleBrushPool templatePool = brushPool;
+
+        extraPool.brushPrefab = sourceBrushPrefab;
+        extraPool.brushLayerName = brushLayerName;
+
+        if (templatePool != null)
+        {
+            extraPool.maxBrushes = templatePool.maxBrushes;
+            extraPool.prewarmOnAwake = templatePool.prewarmOnAwake;
+            extraPool.recycleOldestWhenFull = templatePool.recycleOldestWhenFull;
+            extraPool.disableRendererShadows = templatePool.disableRendererShadows;
+            extraPool.disableColliders = templatePool.disableColliders;
+            extraPool.showDebugGUI = templatePool.showDebugGUI;
+            extraPool.debugGUISize = templatePool.debugGUISize;
+            extraPool.debugGUIFontSize = templatePool.debugGUIFontSize;
+            extraPool.debugGUIBackgroundColor = templatePool.debugGUIBackgroundColor;
+            extraPool.debugGUIBorderColor = templatePool.debugGUIBorderColor;
+            extraPool.debugGUITitleColor = templatePool.debugGUITitleColor;
+            extraPool.debugGUITextColor = templatePool.debugGUITextColor;
+            extraPool.debugGUIShadowColor = templatePool.debugGUIShadowColor;
+            extraPool.debugGUIRefreshInterval = templatePool.debugGUIRefreshInterval;
+            extraPool.debugGUIPosition = templatePool.debugGUIPosition + new Vector2(0f, brushPoolsByPrefab.Count * (templatePool.debugGUISize.y + 8f));
+        }
+
+        int prewarmCount = Mathf.Clamp(autoCreatedExtraPoolPrewarmCount, 0, extraPool.maxBrushes);
+
+        if (extraPool.prewarmOnAwake && prewarmCount > 0)
+            extraPool.Prewarm(prewarmCount);
+
+        return extraPool;
+    }
+
+    // [说明] 真正生成 Brush 物体的统一入口。
+    // [说明] 优先走对象池；没有对象池时 fallback 到 Instantiate + Destroy。
+    private GameObject SpawnBrushObject(
+        GameObject sourceBrushPrefab,
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 scale,
+        float life,
+        Texture normalTex,
+        Texture heightTex,
+        float strengthMultiplier)
+    {
+        float safeLife = Mathf.Max(0.001f, life);
+
+        WaterRippleBrushPool pool = GetPoolForPrefab(sourceBrushPrefab);
+
+        // [说明] 有对象池时，交给 WaterRippleBrushPool 处理激活、参数设置和延迟回收。
+        if (pool != null)
+        {
+            return pool.SpawnBrush(
+                position,
+                rotation,
+                scale,
+                safeLife,
+                normalTex,
+                heightTex,
+                normalStrength,
+                heightStrength,
+                invertHeight,
+                strengthMultiplier
+            );
+        }
+
+        // [说明] 没有对象池时，直接实例化临时 Brush，并在 safeLife 后销毁。
+        GameObject brush = Instantiate(sourceBrushPrefab, position, rotation);
+        brush.transform.localScale = scale;
+
+        int brushLayer = LayerMask.NameToLayer(brushLayerName);
+
+        if (brushLayer >= 0)
+        {
+            SetLayerRecursively(brush, brushLayer);
+        }
+        else
+        {
+            Debug.LogWarning($"[WaterRippleBrushSpawner] 找不到 Layer: {brushLayerName}", this);
+        }
+        
+        // Debug.Log("strengthMultiplier: " + strengthMultiplier);
+        SetupBrushMaterial(brush, normalTex, heightTex, strengthMultiplier);
+        DisableBrushShadows(brush);
+
+        Destroy(brush, safeLife);
+
+        return brush;
+    }
+
     // [说明] 给 Brush 的所有 Renderer 设置材质参数。
     // [说明] 使用 MaterialPropertyBlock 可以避免实例化材质，减少运行时材质副本。
     private void SetupBrushMaterial(GameObject brush, Texture normalTex, Texture heightTex, float strengthMultiplier = 1f)
     {
-        // strengthMultiplier 只影响这一次生成出来的临时 Brush。
-        // 脚步水波不传这个参数，会使用默认值 1，保持原来的效果。
+        // [说明] strengthMultiplier 只影响这一次生成出来的临时 Brush。
+        // [说明] 脚步水波不传这个参数，会使用默认值 1；武器划水可以传更大的倍率来增强输入。
         float safeStrengthMultiplier = Mathf.Max(0f, strengthMultiplier);
 
         // [说明] prefab 可能包含多个 Renderer，因此这里递归获取所有子 Renderer。
@@ -1119,6 +1350,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             // [说明] 如果水波凹凸方向反了，优先检查 invertHeight。
             mpb.SetFloat(NormalStrengthID, normalStrength * safeStrengthMultiplier);
             mpb.SetFloat(HeightStrengthID, heightStrength * safeStrengthMultiplier);
+            // Debug.Log("高度："+heightStrength * safeStrengthMultiplier);
             mpb.SetFloat(InvertHeightID, invertHeight);
 
             r.SetPropertyBlock(mpb);

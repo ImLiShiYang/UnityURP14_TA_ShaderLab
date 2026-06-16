@@ -1,4 +1,4 @@
-Shader "WaterRipple/URP_WaterRippleBrush_NormalHeightSeparate"
+Shader "WaterRipple/WaterRippleBrush"
 {
     Properties
     {
