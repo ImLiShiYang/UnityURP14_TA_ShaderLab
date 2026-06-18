@@ -118,7 +118,18 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     [Range(0f, 1f)]
     public float toeBlend = 0.6f;
 
+    [Header("Leg Splash Follow")]
+    public Transform waterSurface;
 
+    public Transform leftKnee;
+    public Transform rightKnee;
+
+    public ParticleSystem leftLegSplashParticle;
+    public ParticleSystem rightLegSplashParticle;
+
+    public float legSplashHeightOffset = 0.02f;
+    public float legSplashForwardOffset = 0.03f;
+    
     // ============================================================
     // Raycast
     // ============================================================
@@ -226,7 +237,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     [Tooltip("右脚 Brush 使用的高度纹理。通常用来表达水面向下凹陷 / 向上水边的形状。")]
     public Texture rightHeightTex;
 
-
+    
+    
     // ============================================================
     // Brush Material Params
     // ============================================================
@@ -472,6 +484,11 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     {
         if (characterRoot != null)
             lastStepPos = characterRoot.position;
+        
+        if(leftLegSplashParticle!=null)
+            leftLegSplashParticle=Instantiate(leftLegSplashParticle);
+        if(rightLegSplashParticle!=null)
+            rightLegSplashParticle=Instantiate(rightLegSplashParticle);
     }
 
     // [说明] Update 同时支持两种模式：
@@ -508,9 +525,73 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         {
             UpdateEveryFrameFootRipple(true, leftFoot, leftToes, leftNormalTex, leftHeightTex);
             UpdateEveryFrameFootRipple(false, rightFoot, rightToes, rightNormalTex, rightHeightTex);
+            
+            // UpdateLegSplash(leftKnee, leftFoot, leftLegSplashParticle);
+            // UpdateLegSplash(rightKnee, rightFoot, rightLegSplashParticle);
         }
     }
 
+    private void UpdateLegSplash(Transform knee, Transform foot, ParticleSystem particle)
+    {
+        if (knee == null || foot == null || particle == null)
+            return;
+
+        Vector3 rayOrigin = foot.position + Vector3.up * rayStartHeight;
+        float totalRayDistance = rayStartHeight + rayDistance;
+
+        if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit waterHit, totalRayDistance, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            if (particle.isPlaying)
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+
+            return;
+        }
+
+        float waterY = waterHit.point.y + legSplashHeightOffset;
+
+        Debug.DrawLine(rayOrigin, waterHit.point, Color.cyan, 1f);
+
+        float minY = Mathf.Min(knee.position.y, foot.position.y);
+        float maxY = Mathf.Max(knee.position.y, foot.position.y);
+
+        if (waterY < minY || waterY > maxY)
+        {
+            if (particle.isPlaying)
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+
+            return;
+        }
+
+        float t = Mathf.InverseLerp(foot.position.y, knee.position.y, waterY);
+        Vector3 splashPos = Vector3.Lerp(foot.position, knee.position, t);
+
+        Vector3 forward = characterRoot != null ? characterRoot.forward : transform.forward;
+        forward.y = 0f;
+
+        if (forward.sqrMagnitude > 0.0001f)
+        {
+            forward.Normalize();
+            splashPos += forward * legSplashForwardOffset;
+        }
+
+        splashPos.y = waterY;
+
+        particle.transform.position = splashPos;
+        particle.transform.rotation = Quaternion.LookRotation(forward, Vector3.up);
+
+        Debug.DrawRay(splashPos, Vector3.up * 0.5f, Color.red, 0.1f);
+
+        if (!CanSpawnWaterRipple(allowAttackMotion: allowEveryFrameFootRippleDuringAttack))
+        {
+            if (particle.isPlaying)
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+
+            return;
+        }
+
+        if (!particle.isPlaying)
+            particle.Play();
+    }
 
     // ============================================================
     // Animation Event API
@@ -579,10 +660,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     }
 
-
-    // ============================================================
-    // Every Frame Foot Ripple
-    // ============================================================
+    
 
     // [说明] 每帧脚下水波入口。
     // [说明] 这个函数不会一次性补很多插值点，而是“当前帧只生成当前脚位置的一个输入点”。
@@ -660,10 +738,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     // [说明] 取得每帧水波用的脚掌采样点。
     // [说明] 这里和 SpawnWaterRipple 内部的脚掌中心计算保持一致，方便用它做“是否移动足够距离”的判断。
-    private Vector3 GetEveryFrameFootSamplePosition(
-        bool isLeftFoot,
-        Transform footTransform,
-        Transform toeTransform)
+    private Vector3 GetEveryFrameFootSamplePosition(bool isLeftFoot,Transform footTransform,Transform toeTransform)
     {
         Vector3 footBonePosition;
 
@@ -822,8 +897,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         if (footTransform != null)
         {
             footBonePosition = footTransform.position;
-            // footBonePosition = characterRoot.position;
-            // Debug.LogWarning("使用根节点位置");
         }
         // [说明] 如果没有绑定 Foot 骨骼，则使用角色左右方向加 footSideOffset 做一个 fallback 落点。
         else
@@ -945,12 +1018,12 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
         // [说明] 最终 Brush 生成点 = 地面命中点 + 前后修正 + 左右局部修正 + 法线方向抬高。
         // [说明] surfaceOffset 可以避免 Brush 和地面 z-fighting。
-        Vector3 spawnPosition =
-            hit.point +
-            forwardOnSurface * currentForwardOffset +
-            rightOnSurface * localOffset.x +
-            forwardOnSurface * localOffset.y +
-            normal * surfaceOffset;
+        Vector3 spawnPosition = hit.point;
+            
+                               // forwardOnSurface * currentForwardOffset +
+                               // rightOnSurface * localOffset.x +
+                               // forwardOnSurface * localOffset.y +
+                               // normal * surfaceOffset;
 
         // [说明] Quad 默认面朝自身 local +Z 或 -Z 的方向，这里用 -normal 让 Brush 面朝地面。
         // [说明] 第二个参数 forwardOnSurface 决定水波贴图的脚尖朝向。
@@ -1003,6 +1076,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         if (brush == null)
             return false;
 
+        // SpawnFootSplashParticle(spawnPosition, normal);
+        
         if (logSpawn)
         {
             Debug.Log(
@@ -1033,6 +1108,7 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
         return (bool)method.Invoke(wetlandMask, new object[] { point });
     }
+
 
     // [说明] 计算水波在地面上的前方方向。
     // [说明] 优先使用 Foot -> Toes，其次用 Foot.forward，最后用角色整体 forward。

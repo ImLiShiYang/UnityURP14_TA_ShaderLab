@@ -83,7 +83,7 @@ Material:
     - Vector1_46E42935: 0.18
     - Vector1_47683D42: 0.854
     - Vector1_A0EAD698: 0.6
-    - Vector1_A6A0BC26: 0.05
+    - Vector1_A6A0BC26: 0.02
     - Vector1_B9F56378: 0.1
     - Vector1_C360A163: 2
     - Vector1_DF445019: 1.5
@@ -107,7 +107,7 @@ Material:
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _RippleNormalBlend: 0.31
-    - _RippleRefractionStrength: 0.0107
+    - _RippleRefractionStrength: 0.0156
     - _RippleTexSize: 512
     - _RippleVertexDeadZone: 0.06
     - _RippleVertexHeight: 0.2
@@ -129,7 +129,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
-    - _WaterRippleRect: {r: -12, g: -9.93, b: 12, a: 14.07}
+    - _WaterRippleRect: {r: 30.57, g: 3.2799988, b: 54.57, a: 27.279999}
   m_BuildTextureStacks: []
 --- !u!114 &5702210360403225776
 MonoBehaviour:

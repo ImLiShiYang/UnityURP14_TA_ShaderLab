@@ -575,25 +575,7 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
             spawnedAny = true;
             
             string prefabName = brushPrefab != null ? brushPrefab.name : "NULL";
-
-            Debug.Log(
-                $"[WeaponTrail Spawn] " +
-                $"frame={Time.frameCount}, " +
-                $"trailObj={name}, " +
-                $"trailID={GetInstanceID()}, " +
-                $"point={point.name}, " +
-                $"branch={(useAttackBrush ? "ATTACK" : "IDLE")}, " +
-                $"prefab={prefabName}, " +
-                $"isDetecting={isDetecting}, " +
-                $"isAttackWindowActive={isAttackWindowActive}, " +
-                $"attackBrushActive={IsAttackBrushActive()}, " +
-                $"moveDistance={moveDistance:F4}, " +
-                $"required={requiredMoveDistance:F4}, " +
-                $"stampCount={stampCount}, " +
-                $"size={baseBrushSize * sizeMultiplier}, " +
-                $"strength={strengthMultiplier:F2}",
-                this
-            );
+            
 
             // 记录本次命中的深度和位置，用于 Gizmos 和后续调试。
             lastDepth01[index] = depth01;

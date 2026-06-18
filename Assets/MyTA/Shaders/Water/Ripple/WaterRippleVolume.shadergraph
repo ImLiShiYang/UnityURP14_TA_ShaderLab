@@ -6092,7 +6092,7 @@
         true,
         true
     ],
-    "surfaceOptionsFoldout": false,
+    "surfaceOptionsFoldout": true,
     "passesFoldout": false,
     "variantsFoldout": false
 }
@@ -10413,7 +10413,7 @@
     "m_RenderFace": 2,
     "m_AlphaClip": false,
     "m_CastShadows": true,
-    "m_ReceiveShadows": true,
+    "m_ReceiveShadows": false,
     "m_AdditionalMotionVectorMode": 0,
     "m_SupportsLODCrossFade": false,
     "m_SupportsInfinityParticleSystem": false,
@@ -12830,7 +12830,7 @@
     ],
     "synonyms": [],
     "m_Precision": 0,
-    "m_PreviewExpanded": false,
+    "m_PreviewExpanded": true,
     "m_NodeLOD": 0,
     "m_DismissedVersion": 0,
     "m_PreviewMode": 0,
