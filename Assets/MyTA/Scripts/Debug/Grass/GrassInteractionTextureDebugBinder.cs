@@ -15,7 +15,8 @@ public class GrassInteractionTextureDebugBinder : MonoBehaviour
 {
     public enum Source
     {
-        CurrentBrushRT
+        CurrentBrushRT,
+        AccumulatedRT
     }
 
     [Header("Grass Interaction")]
@@ -61,6 +62,9 @@ public class GrassInteractionTextureDebugBinder : MonoBehaviour
         {
             case Source.CurrentBrushRT:
                 return grassInteractionManager.CurrentBrushRT;
+
+            case Source.AccumulatedRT:
+                return grassInteractionManager.AccumA;
 
             default:
                 return null;

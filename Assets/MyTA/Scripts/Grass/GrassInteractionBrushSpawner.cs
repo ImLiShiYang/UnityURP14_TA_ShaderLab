@@ -104,6 +104,10 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     [Tooltip("Brush 沿地面法线抬起一点，避免和地面重合。")]
     public float surfaceOffset = 0.03f;
 
+    [Tooltip("脚掌距离地面不超过该值时，才向草 Shader 提供有效压草中心。")]
+    [Min(0f)]
+    public float maxPressGroundDistance = 0.22f;
+
 
     // ============================================================
     // Surface Mask
@@ -303,6 +307,44 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     public void SpawnRightGrassBrush()
     {
         SpawnRightGrassBrush(false);
+    }
+
+    public bool TryGetFootPressCenter(bool isLeftFoot, out Vector3 centerWS)
+    {
+        centerWS = Vector3.zero;
+
+        Transform footTransform = isLeftFoot ? leftFoot : rightFoot;
+        Transform toeTransform = isLeftFoot ? leftToes : rightToes;
+
+        if (footTransform == null)
+            return false;
+
+        Vector3 footCenter = footTransform.position;
+
+        if (toeTransform != null)
+            footCenter = Vector3.Lerp(footCenter, toeTransform.position, toeBlend);
+
+        Vector3 rayOrigin = footCenter + Vector3.up * rayStartHeight;
+        float totalRayDistance = rayStartHeight + rayDistance;
+
+        if (!Physics.Raycast(
+                rayOrigin,
+                Vector3.down,
+                out RaycastHit hit,
+                totalRayDistance,
+                groundMask,
+                QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        float heightFromSurface = Vector3.Dot(footCenter - hit.point, hit.normal);
+
+        if (heightFromSurface > maxPressGroundDistance)
+            return false;
+
+        centerWS = hit.point;
+        return true;
     }
 
     private void SpawnLeftGrassBrush(bool ignoreMovementGuard)

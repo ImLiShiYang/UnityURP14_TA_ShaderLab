@@ -87,7 +87,10 @@ Material:
     m_Floats:
     - _AlphaClip: 0
     - _AlphaToMask: 0
-    - _BendStrength: 0.8
+    - _ArcLift: 0.12
+    - _BendStrength: 1
+    - _BillboardHeightScale: 1
+    - _BillboardWidthScale: 1
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
     - _BumpScale: 1
@@ -100,26 +103,42 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EnableGrassInteraction: 1
+    - _EnableBillboard: 1
+    - _EnableGrassInteraction: 0
+    - _EnablePressCenter0: 0
+    - _EnablePressCenter1: 0
+    - _EnableRadialPress: 1
     - _EnvironmentReflections: 1
-    - _FlattenStrength: 0.25
+    - _FlattenStrength: 0.4
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
+    - _GradientSampleDistance: 2
     - _GrassHeightMaxOS: 0.322
     - _GrassHeightMinOS: -0.322
     - _HeightMaskPower: 1.5
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
+    - _PressRadius: 1.5
+    - _PressRadius0: 0.45
+    - _PressRadius1: 0.45
     - _QueueOffset: 0
+    - _RadialMaskPower: 1.2
+    - _RandomHeightMax: 1
+    - _RandomHeightMin: 0.75
+    - _RandomWidthMax: 1.15
+    - _RandomWidthMin: 0.85
     - _ReceiveShadows: 1
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
+    - _SpreadHeightPower: 1.8
+    - _SpreadStrength: 0.45
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
+    - _UseRadialBendDir: 1
     - _WindFrequency: 1
     - _WindSpeed: 2
     - _WindStrength: 0.08
@@ -129,11 +148,14 @@ Material:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _GrassBendDirWS: {r: -0.823121, g: 0, b: -0.567866, a: 0}
+    - _GrassBendDirWS: {r: 0.86780006, g: 0, b: 0.49691355, a: 0}
     - _GrassHeightAxisOS: {r: 0, g: 0, b: 1, a: 0}
-    - _GrassInteractionRect: {r: -9.376036, g: -11.100475, b: 6.6239643, a: 4.899524}
+    - _GrassInteractionRect: {r: -11.5255, g: -11.09375, b: 4.4744997, a: 4.90625}
+    - _PressCenter0WS: {r: -3.5137618, g: 1.2531691e-17, b: -2.821886, a: 0}
+    - _PressCenter1WS: {r: -3.4151044, g: 1.421311e-17, b: -3.200508, a: 0}
+    - _PressCenterWS: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
-    - _TipColor: {r: 0.45, g: 0.85, b: 0.24999997, a: 1}
+    - _TipColor: {r: 0.36666667, g: 1, b: 0, a: 1}
     - _WindDirectionWS: {r: 1, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
 --- !u!114 &4393950924113072679

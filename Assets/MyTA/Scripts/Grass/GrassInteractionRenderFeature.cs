@@ -113,8 +113,10 @@ public class GrassInteractionRenderFeature : ScriptableRendererFeature
                 return;
 
             RenderTexture currentBrushRT = manager.CurrentBrushRT;
+            RenderTexture accumB = manager.AccumB;
+            Material accumulateMaterial = manager.AccumulateMaterial;
 
-            if (currentBrushRT == null)
+            if (currentBrushRT == null || accumB == null || accumulateMaterial == null)
                 return;
 
             CommandBuffer cmd = CommandBufferPool.Get(settings.profilerTag);
@@ -136,6 +138,13 @@ public class GrassInteractionRenderFeature : ScriptableRendererFeature
                 ref drawingSettings,
                 ref filteringSettings
             );
+
+            manager.SetupAccumulateMaterial();
+            cmd.Blit(currentBrushRT, accumB, accumulateMaterial);
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
+
+            manager.SwapAccumAfterRenderFeature();
 
             CommandBufferPool.Release(cmd);
         }
