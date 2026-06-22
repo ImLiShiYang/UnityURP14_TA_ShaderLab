@@ -7,6 +7,7 @@ TagManager:
   - LightCamera
   - LightCamera_Cascade0
   - LightCamera_Cascade1
+  - CinemachineTarget
   layers:
   - Default
   - TransparentFX
@@ -22,8 +23,8 @@ TagManager:
   - CustomWater
   - WaterRippleBrush
   - Player
-  - 
-  - 
+  - GrassInteractionBrush
+  - GrassGround
   - 
   - 
   - 
