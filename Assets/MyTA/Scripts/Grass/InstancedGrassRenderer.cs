@@ -10,9 +10,10 @@ using UnityEngine.Rendering;
 /// 2. 用 Raycast 把草落到地面上。
 /// 3. 用 Graphics.DrawMeshInstanced 批量绘制，不创建大量草 GameObject。
 /// 4. 把草按世界坐标切成 Chunk，方便下一步做视锥剔除和无限加载。
+/// 5. 可选：根据 target 位置动态创建 / 回收 Chunk，形成第一版“无限草”。
 ///
 /// 当前版本还不做：
-/// 视锥剔除、无限加载、GPU Indirect。
+/// GPU Indirect。
 /// 后续可以在这个基础上继续扩展。
 /// </summary>
 [DisallowMultipleComponent]
@@ -59,6 +60,26 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     [Tooltip("选中物体时显示生成出来的 Chunk 边界。")]
     public bool showChunkGizmos = true;
+
+    [Header("Infinite Loading")]
+    [Tooltip("开启后，不再只生成一次固定圆形草地，而是根据 target 位置动态创建 / 回收 Chunk。")]
+    public bool enableInfiniteLoading = false;
+
+    [Tooltip("无限模式下，target 周围多远范围内的 Chunk 会被保留。")]
+    [Min(0.5f)]
+    public float loadRadius = 20f;
+
+    [Tooltip("无限模式下，每个 Chunk 内尝试生成多少棵草。")]
+    [Min(0)]
+    public int instancesPerChunk = 800;
+
+    [Tooltip("无限模式下，每隔多少秒检查一次需要加载 / 回收的 Chunk。")]
+    [Min(0.02f)]
+    public float infiniteUpdateInterval = 0.2f;
+
+    [Tooltip("每次检查最多新生成多少个 Chunk。数值越大，移动时越不容易空，但生成瞬间越容易卡。")]
+    [Min(1)]
+    public int maxNewChunksPerUpdate = 4;
 
     [Header("Culling")]
     [Tooltip("用于视锥剔除的主相机。不填时会自动使用 Camera.main。")]
@@ -134,6 +155,7 @@ public class InstancedGrassRenderer : MonoBehaviour
     private int visibleChunkCount;
     private int visibleInstanceCount;
     private readonly Plane[] frustumPlanes = new Plane[6];
+    private float nextInfiniteUpdateTime;
 
     public int GeneratedCount => generatedCount;
     public int DrawCallCount => drawCallCount;
@@ -171,6 +193,12 @@ public class InstancedGrassRenderer : MonoBehaviour
         if (Input.GetKeyDown(regenerateKey))
             Regenerate();
 
+        if (enableInfiniteLoading && Time.time >= nextInfiniteUpdateTime)
+        {
+            nextInfiniteUpdateTime = Time.time + infiniteUpdateInterval;
+            UpdateInfiniteChunks(false);
+        }
+
         // DrawMeshInstanced 不是 Renderer 组件，
         // 所以需要每帧主动调用一次绘制。
         DrawGrass();
@@ -184,6 +212,9 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         if (chunkSize < 0.5f)
             chunkSize = 0.5f;
+
+        if (loadRadius < chunkSize)
+            loadRadius = chunkSize;
 
         if (cullingBoundsPadding < 0f)
             cullingBoundsPadding = 0f;
@@ -237,6 +268,7 @@ public class InstancedGrassRenderer : MonoBehaviour
         drawCallCount = 0;
         visibleChunkCount = 0;
         visibleInstanceCount = 0;
+        nextInfiniteUpdateTime = 0f;
 
         if (target == null)
         {
@@ -254,6 +286,18 @@ public class InstancedGrassRenderer : MonoBehaviour
         // 不开启时 Unity 会报错或者不绘制。
         if (autoEnableMaterialInstancing && !grassMaterial.enableInstancing)
             grassMaterial.enableInstancing = true;
+
+        if (enableInfiniteLoading)
+        {
+            UpdateInfiniteChunks(true);
+
+            Debug.Log(
+                $"[InstancedGrassRenderer] Infinite mode generated {GeneratedCount} grass instances, chunks={ChunkCount}, drawCalls={DrawCallCount}.",
+                this
+            );
+
+            return;
+        }
 
         System.Random random = new System.Random(randomSeed);
 
@@ -283,61 +327,25 @@ public class InstancedGrassRenderer : MonoBehaviour
                 center.z + offset.y
             );
 
-            // 从上往下打射线，找到草应该落到的地面位置。
-            if (!Physics.Raycast(
+            if (!TryCreateGrassInstance(
                     rayOrigin,
-                    Vector3.down,
-                    out RaycastHit hit,
-                    raycastDistance,
-                    groundMask,
-                    QueryTriggerInteraction.Ignore))
+                    random,
+                    baseRotation,
+                    rootLocalOffset,
+                    out Matrix4x4 matrix,
+                    out Vector3 rootPosition))
             {
                 continue;
             }
-
-            // 过滤太陡的坡面。
-            // 比如石壁、垂直墙面不应该长草。
-            float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
-
-            if (slopeAngle > maxSlopeAngle)
-                continue;
-
-            // 每棵草随机绕 Y 轴旋转，避免所有草朝向一致。
-            float yaw = RandomRange(random, 0f, 360f);
-
-            // 每棵草随机缩放，避免高度完全一致。
-            float scale = RandomRange(random, minScale, maxScale);
-
-            Quaternion yawRotation = Quaternion.Euler(0f, yaw, 0f);
-            Quaternion rotation = yawRotation * baseRotation;
-
-            // 可选：让草跟随地面法线倾斜。
-            // 第一版默认关闭，因为 billboard 草或者竖直草片在斜坡上可能会显得奇怪。
-            if (alignToGroundNormal)
-            {
-                Quaternion groundAlign = Quaternion.FromToRotation(Vector3.up, hit.normal);
-                rotation = groundAlign * rotation;
-            }
-
-            // rootPosition 表示“草根应该放到的位置”。
-            // 这里沿地面法线稍微抬高，避免和地面闪烁。
-            Vector3 rootPosition = hit.point + hit.normal * (groundOffset + extraRootOffset);
-
-            // 如果 pivot 不在草根，需要把整个实例位置反向偏移，
-            // 让 Mesh 的最低点，而不是 pivot，对齐到 rootPosition。
-            Vector3 position = rootPosition - rotation * (rootLocalOffset * scale);
-
-            Vector3 scaleVector = Vector3.one * scale;
 
             // 1. 先生成一棵草的矩阵 matrix
             // 2. 根据草根位置 rootPosition 算出它属于哪个 Chunk
             // 3. 找到这个 Chunk；如果没有就新建
             // 4. 把这棵草加进这个 Chunk
             // 5. 生成数量 +1
-            Matrix4x4 matrix = Matrix4x4.TRS(position, rotation, scaleVector);
             Vector2Int chunkCoord = WorldToChunkCoord(rootPosition, chunkSize);
             GrassChunk chunk = GetOrCreateChunk(chunkCoord);
-            
+
             chunk.Add(matrix, rootPosition, grassMesh.bounds);
             generatedCount++;
         }
@@ -349,6 +357,171 @@ public class InstancedGrassRenderer : MonoBehaviour
             $"[InstancedGrassRenderer] Generated {GeneratedCount}/{instanceCount} grass instances, chunks={ChunkCount}, drawCalls={DrawCallCount}.",
             this
         );
+    }
+
+    private void UpdateInfiniteChunks(bool generateAllMissing)
+    {
+        if (target == null || grassMesh == null || grassMaterial == null)
+            return;
+
+        if (autoEnableMaterialInstancing && !grassMaterial.enableInstancing)
+            grassMaterial.enableInstancing = true;
+
+        Vector3 center = target.position;
+        int chunkRadius = Mathf.CeilToInt(loadRadius / Mathf.Max(chunkSize, 0.0001f));
+        Vector2Int centerCoord = WorldToChunkCoord(center, chunkSize);
+
+        HashSet<Vector2Int> desiredCoords = new HashSet<Vector2Int>();
+        float sqrLoadRadius = loadRadius * loadRadius;
+
+        for (int z = -chunkRadius; z <= chunkRadius; z++)
+        {
+            for (int x = -chunkRadius; x <= chunkRadius; x++)
+            {
+                Vector2Int coord = new Vector2Int(centerCoord.x + x, centerCoord.y + z);
+                Vector3 chunkCenter = ChunkCoordToWorldCenter(coord, chunkSize, center.y);
+                Vector2 delta = new Vector2(chunkCenter.x - center.x, chunkCenter.z - center.z);
+
+                if (delta.sqrMagnitude > sqrLoadRadius)
+                    continue;
+
+                desiredCoords.Add(coord);
+            }
+        }
+
+        List<Vector2Int> coordsToRemove = new List<Vector2Int>();
+
+        foreach (Vector2Int coord in chunks.Keys)
+        {
+            if (!desiredCoords.Contains(coord))
+                coordsToRemove.Add(coord);
+        }
+
+        for (int i = 0; i < coordsToRemove.Count; i++)
+        {
+            GrassChunk chunk = chunks[coordsToRemove[i]];
+            generatedCount -= chunk.InstanceCount;
+            chunks.Remove(coordsToRemove[i]);
+        }
+
+        int generatedThisUpdate = 0;
+
+        foreach (Vector2Int coord in desiredCoords)
+        {
+            if (chunks.ContainsKey(coord))
+                continue;
+
+            GenerateChunk(coord);
+            generatedThisUpdate++;
+
+            if (!generateAllMissing && generatedThisUpdate >= maxNewChunksPerUpdate)
+                break;
+        }
+
+        RecalculateDrawCallCount();
+    }
+
+    private void GenerateChunk(Vector2Int coord)
+    {
+        GrassChunk chunk = GetOrCreateChunk(coord);
+        System.Random random = new System.Random(GetChunkSeed(coord));
+        Quaternion baseRotation = Quaternion.Euler(baseRotationEuler);
+        Vector3 rootLocalOffset = alignMeshRootToGround
+            ? CalculateMeshRootLocalOffset(grassMesh, meshHeightAxis)
+            : Vector3.zero;
+
+        float safeChunkSize = Mathf.Max(chunkSize, 0.0001f);
+        float minX = coord.x * safeChunkSize;
+        float minZ = coord.y * safeChunkSize;
+        float rayY = target.position.y + raycastHeight;
+        int maxAttempts = Mathf.Max(instancesPerChunk * 8, instancesPerChunk);
+        int generatedInChunk = 0;
+
+        for (int attempt = 0; attempt < maxAttempts && generatedInChunk < instancesPerChunk; attempt++)
+        {
+            Vector3 rayOrigin = new Vector3(
+                minX + RandomRange(random, 0f, safeChunkSize),
+                rayY,
+                minZ + RandomRange(random, 0f, safeChunkSize)
+            );
+
+            if (!TryCreateGrassInstance(
+                    rayOrigin,
+                    random,
+                    baseRotation,
+                    rootLocalOffset,
+                    out Matrix4x4 matrix,
+                    out Vector3 rootPosition))
+            {
+                continue;
+            }
+
+            chunk.Add(matrix, rootPosition, grassMesh.bounds);
+            generatedInChunk++;
+            generatedCount++;
+        }
+
+        chunk.BuildDrawBatches();
+    }
+
+    private bool TryCreateGrassInstance(
+        Vector3 rayOrigin,
+        System.Random random,
+        Quaternion baseRotation,
+        Vector3 rootLocalOffset,
+        out Matrix4x4 matrix,
+        out Vector3 rootPosition)
+    {
+        matrix = Matrix4x4.identity;
+        rootPosition = Vector3.zero;
+
+        // 从上往下打射线，找到草应该落到的地面位置。
+        if (!Physics.Raycast(
+                rayOrigin,
+                Vector3.down,
+                out RaycastHit hit,
+                raycastDistance,
+                groundMask,
+                QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        // 过滤太陡的坡面。
+        // 比如石壁、垂直墙面不应该长草。
+        float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
+
+        if (slopeAngle > maxSlopeAngle)
+            return false;
+
+        // 每棵草随机绕 Y 轴旋转，避免所有草朝向一致。
+        float yaw = RandomRange(random, 0f, 360f);
+
+        // 每棵草随机缩放，避免高度完全一致。
+        float scale = RandomRange(random, minScale, maxScale);
+
+        Quaternion yawRotation = Quaternion.Euler(0f, yaw, 0f);
+        Quaternion rotation = yawRotation * baseRotation;
+
+        // 可选：让草跟随地面法线倾斜。
+        // 第一版默认关闭，因为 billboard 草或者竖直草片在斜坡上可能会显得奇怪。
+        if (alignToGroundNormal)
+        {
+            Quaternion groundAlign = Quaternion.FromToRotation(Vector3.up, hit.normal);
+            rotation = groundAlign * rotation;
+        }
+
+        // rootPosition 表示“草根应该放到的位置”。
+        // 这里沿地面法线稍微抬高，避免和地面闪烁。
+        rootPosition = hit.point + hit.normal * (groundOffset + extraRootOffset);
+
+        // 如果 pivot 不在草根，需要把整个实例位置反向偏移，
+        // 让 Mesh 的最低点，而不是 pivot，对齐到 rootPosition。
+        Vector3 position = rootPosition - rotation * (rootLocalOffset * scale);
+        Vector3 scaleVector = Vector3.one * scale;
+
+        matrix = Matrix4x4.TRS(position, rotation, scaleVector);
+        return true;
     }
 
     private void DrawGrass()
@@ -404,13 +577,18 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private void BuildDrawBatches()
     {
+        foreach (GrassChunk chunk in chunks.Values)
+            chunk.BuildDrawBatches();
+
+        RecalculateDrawCallCount();
+    }
+
+    private void RecalculateDrawCallCount()
+    {
         drawCallCount = 0;
 
         foreach (GrassChunk chunk in chunks.Values)
-        {
-            chunk.BuildDrawBatches();
             drawCallCount += chunk.drawBatches.Count;
-        }
     }
 
     // 根据 Chunk 坐标获取对应的 GrassChunk。
@@ -442,6 +620,28 @@ public class InstancedGrassRenderer : MonoBehaviour
             Mathf.FloorToInt(worldPosition.x / safeChunkSize),
             Mathf.FloorToInt(worldPosition.z / safeChunkSize)
         );
+    }
+
+    private static Vector3 ChunkCoordToWorldCenter(Vector2Int coord, float chunkSize, float y)
+    {
+        float safeChunkSize = Mathf.Max(chunkSize, 0.0001f);
+
+        return new Vector3(
+            (coord.x + 0.5f) * safeChunkSize,
+            y,
+            (coord.y + 0.5f) * safeChunkSize
+        );
+    }
+
+    private int GetChunkSeed(Vector2Int coord)
+    {
+        unchecked
+        {
+            int hash = randomSeed;
+            hash = hash * 73856093 ^ coord.x;
+            hash = hash * 19349663 ^ coord.y;
+            return hash;
+        }
     }
 
     private class GrassChunk

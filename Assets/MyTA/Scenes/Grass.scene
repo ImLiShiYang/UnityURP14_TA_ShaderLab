@@ -503,6 +503,11 @@ MonoBehaviour:
   groundOffset: 0.01
   chunkSize: 4
   showChunkGizmos: 1
+  enableInfiniteLoading: 1
+  loadRadius: 20
+  instancesPerChunk: 3200
+  infiniteUpdateInterval: 0.2
+  maxNewChunksPerUpdate: 4
   cullingCamera: {fileID: 1451020792}
   enableFrustumCulling: 1
   cullingBoundsPadding: 1
