@@ -60,6 +60,20 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Tooltip("选中物体时显示生成出来的 Chunk 边界。")]
     public bool showChunkGizmos = true;
 
+    [Header("Culling")]
+    [Tooltip("用于视锥剔除的主相机。不填时会自动使用 Camera.main。")]
+    public Camera cullingCamera;
+
+    [Tooltip("是否跳过主相机视锥外的 Chunk。")]
+    public bool enableFrustumCulling = true;
+
+    [Tooltip("视锥剔除 Bounds 的额外扩张。数值越大，越不容易在屏幕边缘突然消失。")]
+    [Min(0f)]
+    public float cullingBoundsPadding = 1f;
+
+    [Tooltip("选中物体时用绿色显示可见 Chunk，用灰色显示被剔除 Chunk。")]
+    public bool showCullingStateInGizmos = true;
+
     [Header("Raycast")]
     [Tooltip("从随机点上方多高开始向下打射线。")]
     [Min(0.1f)]
@@ -117,10 +131,15 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private int generatedCount;
     private int drawCallCount;
+    private int visibleChunkCount;
+    private int visibleInstanceCount;
+    private readonly Plane[] frustumPlanes = new Plane[6];
 
     public int GeneratedCount => generatedCount;
     public int DrawCallCount => drawCallCount;
     public int ChunkCount => chunks.Count;
+    public int VisibleChunkCount => visibleChunkCount;
+    public int VisibleInstanceCount => visibleInstanceCount;
 
     private void Awake()
     {
@@ -133,6 +152,9 @@ public class InstancedGrassRenderer : MonoBehaviour
             if (player != null)
                 target = player.transform;
         }
+
+        if (cullingCamera == null)
+            cullingCamera = Camera.main;
     }
 
     private void Start()
@@ -163,6 +185,9 @@ public class InstancedGrassRenderer : MonoBehaviour
         if (chunkSize < 0.5f)
             chunkSize = 0.5f;
 
+        if (cullingBoundsPadding < 0f)
+            cullingBoundsPadding = 0f;
+
         // 高度轴不能是 0 向量，否则后面 normalized 会出问题。
         if (meshHeightAxis.sqrMagnitude < 0.0001f)
             meshHeightAxis = Vector3.forward;
@@ -179,11 +204,27 @@ public class InstancedGrassRenderer : MonoBehaviour
         if (!showChunkGizmos)
             return;
 
-        Gizmos.color = new Color(0.15f, 0.65f, 1f, 0.35f);
+        bool hasCullingCamera = enableFrustumCulling && cullingCamera != null;
+
+        if (hasCullingCamera)
+            GeometryUtility.CalculateFrustumPlanes(cullingCamera, frustumPlanes);
 
         foreach (GrassChunk chunk in chunks.Values)
         {
             Bounds bounds = chunk.bounds;
+
+            if (showCullingStateInGizmos && hasCullingCamera)
+            {
+                bool visible = IsChunkVisible(chunk);
+                Gizmos.color = visible
+                    ? new Color(0.15f, 1f, 0.35f, 0.45f)
+                    : new Color(0.45f, 0.45f, 0.45f, 0.18f);
+            }
+            else
+            {
+                Gizmos.color = new Color(0.15f, 0.65f, 1f, 0.35f);
+            }
+
             Gizmos.DrawWireCube(bounds.center, bounds.size);
         }
     }
@@ -194,6 +235,8 @@ public class InstancedGrassRenderer : MonoBehaviour
         chunks.Clear();
         generatedCount = 0;
         drawCallCount = 0;
+        visibleChunkCount = 0;
+        visibleInstanceCount = 0;
 
         if (target == null)
         {
@@ -323,9 +366,22 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         int layer = gameObject.layer;
+        bool useFrustumCulling = enableFrustumCulling && cullingCamera != null;
+
+        if (useFrustumCulling)
+            GeometryUtility.CalculateFrustumPlanes(cullingCamera, frustumPlanes);
+
+        visibleChunkCount = 0;
+        visibleInstanceCount = 0;
 
         foreach (GrassChunk chunk in chunks.Values)
         {
+            if (useFrustumCulling && !IsChunkVisible(chunk))
+                continue;
+
+            visibleChunkCount++;
+            visibleInstanceCount += chunk.InstanceCount;
+
             for (int i = 0; i < chunk.drawBatches.Count; i++)
             {
                 // 这里没有创建草 GameObject。
@@ -369,6 +425,13 @@ public class InstancedGrassRenderer : MonoBehaviour
         return chunk;
     }
 
+    private bool IsChunkVisible(GrassChunk chunk)
+    {
+        Bounds paddedBounds = chunk.bounds;
+        paddedBounds.Expand(cullingBoundsPadding * 2f);
+        return GeometryUtility.TestPlanesAABB(frustumPlanes, paddedBounds);
+    }
+
     // 把世界坐标转换成 Chunk 坐标。
     // 这里只看 XZ 平面，因为草地分块是按地面平面划分的。
     private static Vector2Int WorldToChunkCoord(Vector3 worldPosition, float chunkSize)
@@ -396,6 +459,8 @@ public class InstancedGrassRenderer : MonoBehaviour
         public Bounds bounds;
 
         private bool hasBounds;
+
+        public int InstanceCount => matrices.Count;
 
         public GrassChunk(Vector2Int coord, float chunkSize)
         {

@@ -501,6 +501,12 @@ MonoBehaviour:
   spawnRadius: 10
   randomSeed: 12345
   groundOffset: 0.01
+  chunkSize: 4
+  showChunkGizmos: 1
+  cullingCamera: {fileID: 1451020792}
+  enableFrustumCulling: 1
+  cullingBoundsPadding: 1
+  showCullingStateInGizmos: 1
   raycastHeight: 20
   raycastDistance: 60
   groundMask:
