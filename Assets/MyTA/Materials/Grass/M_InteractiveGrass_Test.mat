@@ -14,7 +14,7 @@ Material:
   m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
-  m_EnableInstancingVariants: 0
+  m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: -1
   stringTagMap: {}
@@ -128,9 +128,9 @@ Material:
     - _PressRadius1: 0.45
     - _QueueOffset: 0
     - _RadialMaskPower: 1.2
-    - _RandomNormal: 0.32
     - _RandomHeightMax: 1
     - _RandomHeightMin: 0.75
+    - _RandomNormal: 0.32
     - _RandomWidthMax: 1.15
     - _RandomWidthMin: 0.85
     - _ReceiveShadows: 1
@@ -153,16 +153,16 @@ Material:
     - _BaseColor: {r: 0.18, g: 0.55, b: 0.08, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _GroundColor: {r: 0.05, g: 0.12, b: 0.03, a: 1}
-    - _GrassBendDirWS: {r: 0, g: 0, b: 1, a: 0}
+    - _GrassBendDirWS: {r: 0.89682096, g: 0, b: 0.44239375, a: 0}
     - _GrassHeightAxisOS: {r: 0, g: 0, b: 1, a: 0}
-    - _GrassInteractionRect: {r: -8.963, g: -8, b: 7.037, a: 8}
-    - _PressCenter0WS: {r: -1.1881883, g: -5.6880475e-19, b: 0.12808344, a: 0}
-    - _PressCenter1WS: {r: -0.81006676, g: -1.456708e-19, b: 0.032802146, a: 0}
+    - _GrassInteractionRect: {r: -4.6505003, g: -5.53125, b: 11.3495, a: 10.46875}
+    - _GroundColor: {r: 0.05, g: 0.12, b: 0.03, a: 1}
+    - _PressCenter0WS: {r: 3.369934, g: 0, b: 2.7324677, a: 0}
+    - _PressCenter1WS: {r: 3.451027, g: 0, b: 2.3500519, a: 0}
     - _PressCenterWS: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _TipColor: {r: 0.45, g: 1, b: 0.08, a: 1}
-    - _WindDirectionWS: {r: 1, g: 0, b: 0, a: 0}
+    - _WindDirectionWS: {r: 0, g: 0, b: 1, a: 0}
   m_BuildTextureStacks: []
 --- !u!114 &4393950924113072679
 MonoBehaviour:

@@ -146,6 +146,7 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
 
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile_instancing
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
@@ -218,6 +219,7 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             {
                 float4 positionOS : POSITION;
                 float2 uv : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             // 顶点到片元的数据。
@@ -544,6 +546,8 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             // 5. 叠加风、径向摊开、弧形上拱和压平。
             Varyings vert(Attributes input)
             {
+                UNITY_SETUP_INSTANCE_ID(input);
+
                 Varyings output;
 
                 float3 positionOS = input.positionOS.xyz;
