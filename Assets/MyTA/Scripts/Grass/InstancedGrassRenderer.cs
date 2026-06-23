@@ -19,9 +19,18 @@ using UnityEngine.Rendering;
 [DisallowMultipleComponent]
 public class InstancedGrassRenderer : MonoBehaviour
 {
+    public enum GrassRenderMode
+    {
+        DrawMeshInstanced,
+        DrawMeshInstancedIndirect
+    }
+
     // Unity 的 Graphics.DrawMeshInstanced 单次最多绘制 1023 个实例。
     // 超过这个数量时，需要拆成多个 draw batch。
     private const int MaxInstancesPerDrawCall = 1023;
+    private static readonly int GrassMatricesId = Shader.PropertyToID("_GrassMatrices");
+    private static readonly int UseIndirectGrassId = Shader.PropertyToID("_UseIndirectGrass");
+    private const string GrassIndirectKeyword = "GRASS_INDIRECT";
 
     [Header("Target")]
     [Tooltip("第一版以这个目标为中心生成草。建议拖 Player 根节点。")]
@@ -136,6 +145,9 @@ public class InstancedGrassRenderer : MonoBehaviour
     public float maxScale = 1.2f;
 
     [Header("Render")]
+    [Tooltip("绘制模式。DrawMeshInstanced 是旧版安全路径；DrawMeshInstancedIndirect 每个可见 Chunk 一次 GPU Indirect 绘制。")]
+    public GrassRenderMode renderMode = GrassRenderMode.DrawMeshInstanced;
+
     public ShadowCastingMode shadowCastingMode = ShadowCastingMode.On;
     public bool receiveShadows = true;
 
@@ -156,6 +168,8 @@ public class InstancedGrassRenderer : MonoBehaviour
     private int visibleInstanceCount;
     private readonly Plane[] frustumPlanes = new Plane[6];
     private float nextInfiniteUpdateTime;
+    private GrassRenderMode lastAppliedRenderMode;
+    private bool hasAppliedRenderMode;
 
     public int GeneratedCount => generatedCount;
     public int DrawCallCount => drawCallCount;
@@ -263,7 +277,7 @@ public class InstancedGrassRenderer : MonoBehaviour
     [ContextMenu("Regenerate Grass Instances")]
     public void Regenerate()
     {
-        chunks.Clear();
+        ClearChunks();
         generatedCount = 0;
         drawCallCount = 0;
         visibleChunkCount = 0;
@@ -284,6 +298,8 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         // DrawMeshInstanced 要求材质开启 GPU Instancing。
         // 不开启时 Unity 会报错或者不绘制。
+        ApplyRenderModeToMaterial();
+
         if (autoEnableMaterialInstancing && !grassMaterial.enableInstancing)
             grassMaterial.enableInstancing = true;
 
@@ -401,6 +417,7 @@ public class InstancedGrassRenderer : MonoBehaviour
         {
             GrassChunk chunk = chunks[coordsToRemove[i]];
             generatedCount -= chunk.InstanceCount;
+            chunk.ReleaseIndirectBuffers();
             chunks.Remove(coordsToRemove[i]);
         }
 
@@ -462,6 +479,9 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         chunk.BuildDrawBatches();
+
+        if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
+            chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassMatricesId);
     }
 
     private bool TryCreateGrassInstance(
@@ -530,6 +550,8 @@ public class InstancedGrassRenderer : MonoBehaviour
             return;
 
         // 防止运行中材质 Instancing 被关掉。
+        ApplyRenderModeToMaterial();
+
         if (!grassMaterial.enableInstancing)
         {
             if (!autoEnableMaterialInstancing)
@@ -555,6 +577,32 @@ public class InstancedGrassRenderer : MonoBehaviour
             visibleChunkCount++;
             visibleInstanceCount += chunk.InstanceCount;
 
+            if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
+            {
+                if (!chunk.HasIndirectBuffers)
+                    chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassMatricesId);
+
+                if (chunk.HasIndirectBuffers)
+                {
+                    grassMaterial.SetBuffer(GrassMatricesId, chunk.MatrixBuffer);
+
+                    Graphics.DrawMeshInstancedIndirect(
+                        grassMesh,
+                        submeshIndex,
+                        grassMaterial,
+                        chunk.bounds,
+                        chunk.ArgsBuffer,
+                        0,
+                        chunk.PropertyBlock,
+                        shadowCastingMode,
+                        receiveShadows,
+                        layer
+                    );
+                }
+
+                continue;
+            }
+
             for (int i = 0; i < chunk.drawBatches.Count; i++)
             {
                 // 这里没有创建草 GameObject。
@@ -578,7 +626,12 @@ public class InstancedGrassRenderer : MonoBehaviour
     private void BuildDrawBatches()
     {
         foreach (GrassChunk chunk in chunks.Values)
+        {
             chunk.BuildDrawBatches();
+
+            if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
+                chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassMatricesId);
+        }
 
         RecalculateDrawCallCount();
     }
@@ -588,11 +641,66 @@ public class InstancedGrassRenderer : MonoBehaviour
         drawCallCount = 0;
 
         foreach (GrassChunk chunk in chunks.Values)
+        {
+            if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
+            {
+                if (chunk.InstanceCount > 0)
+                    drawCallCount++;
+
+                continue;
+            }
+
             drawCallCount += chunk.drawBatches.Count;
+        }
     }
 
     // 根据 Chunk 坐标获取对应的 GrassChunk。
     // 如果这个 Chunk 还不存在，就创建一个新的并存进字典。
+    private void ApplyRenderModeToMaterial()
+    {
+        if (grassMaterial == null)
+            return;
+
+        if (hasAppliedRenderMode && lastAppliedRenderMode == renderMode)
+            return;
+
+        bool useIndirect = renderMode == GrassRenderMode.DrawMeshInstancedIndirect;
+
+        if (hasAppliedRenderMode &&
+            lastAppliedRenderMode == GrassRenderMode.DrawMeshInstancedIndirect &&
+            !useIndirect)
+        {
+            ReleaseAllIndirectBuffers();
+        }
+
+        if (useIndirect)
+            grassMaterial.EnableKeyword(GrassIndirectKeyword);
+        else
+            grassMaterial.DisableKeyword(GrassIndirectKeyword);
+
+        grassMaterial.SetFloat(UseIndirectGrassId, useIndirect ? 1f : 0f);
+
+        lastAppliedRenderMode = renderMode;
+        hasAppliedRenderMode = true;
+    }
+
+    private void ClearChunks()
+    {
+        ReleaseAllIndirectBuffers();
+        chunks.Clear();
+    }
+
+    private void ReleaseAllIndirectBuffers()
+    {
+        foreach (GrassChunk chunk in chunks.Values)
+            chunk.ReleaseIndirectBuffers();
+    }
+
+    private void OnDestroy()
+    {
+        ReleaseAllIndirectBuffers();
+    }
+
     private GrassChunk GetOrCreateChunk(Vector2Int coord)
     {
         if (chunks.TryGetValue(coord, out GrassChunk chunk))
@@ -654,13 +762,20 @@ public class InstancedGrassRenderer : MonoBehaviour
         public readonly List<Matrix4x4> matrices = new List<Matrix4x4>();
         public readonly List<Matrix4x4[]> drawBatches = new List<Matrix4x4[]>();
         public readonly List<int> drawBatchCounts = new List<int>();
+        
+        public MaterialPropertyBlock PropertyBlock { get; private set; }
+        public ComputeBuffer ArgsBuffer { get; private set; }
+        public ComputeBuffer MatrixBuffer => matrixBuffer;
 
         //这个 Chunk 的包围盒
         public Bounds bounds;
 
         private bool hasBounds;
+        private ComputeBuffer matrixBuffer;
+        private uint[] indirectArgs;
 
         public int InstanceCount => matrices.Count;
+        public bool HasIndirectBuffers => matrixBuffer != null && ArgsBuffer != null && PropertyBlock != null;
 
         public GrassChunk(Vector2Int coord, float chunkSize)
         {
@@ -717,6 +832,50 @@ public class InstancedGrassRenderer : MonoBehaviour
                 drawBatches.Add(batch);
                 drawBatchCounts.Add(count);
             }
+        }
+
+        public void BuildIndirectBuffers(Mesh mesh, int submeshIndex, int grassMatricesId)
+        {
+            ReleaseIndirectBuffers();
+
+            if (mesh == null || matrices.Count == 0)
+                return;
+
+            int safeSubmeshIndex = Mathf.Clamp(submeshIndex, 0, mesh.subMeshCount - 1);
+
+            matrixBuffer = new ComputeBuffer(matrices.Count, 64);
+            matrixBuffer.SetData(matrices);
+
+            indirectArgs = new uint[5];
+            indirectArgs[0] = mesh.GetIndexCount(safeSubmeshIndex);
+            indirectArgs[1] = (uint)matrices.Count;
+            indirectArgs[2] = mesh.GetIndexStart(safeSubmeshIndex);
+            indirectArgs[3] = mesh.GetBaseVertex(safeSubmeshIndex);
+            indirectArgs[4] = 0;
+
+            ArgsBuffer = new ComputeBuffer(1, indirectArgs.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+            ArgsBuffer.SetData(indirectArgs);
+
+            PropertyBlock = new MaterialPropertyBlock();
+            PropertyBlock.SetBuffer(grassMatricesId, matrixBuffer);
+        }
+
+        public void ReleaseIndirectBuffers()
+        {
+            if (matrixBuffer != null)
+            {
+                matrixBuffer.Release();
+                matrixBuffer = null;
+            }
+
+            if (ArgsBuffer != null)
+            {
+                ArgsBuffer.Release();
+                ArgsBuffer = null;
+            }
+
+            PropertyBlock = null;
+            indirectArgs = null;
         }
 
         private static Bounds TransformBounds(Bounds localBounds, Matrix4x4 matrix)

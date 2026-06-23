@@ -147,6 +147,7 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
+            #pragma multi_compile _ GRASS_INDIRECT
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
@@ -212,6 +213,19 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
 
             CBUFFER_END
 
+            #if defined(GRASS_INDIRECT)
+                StructuredBuffer<float4x4> _GrassMatrices;
+            #endif
+
+            float3 GrassTransformObjectToWorld(float3 positionOS, uint grassInstanceID)
+            {
+                #if defined(GRASS_INDIRECT)
+                    return mul(_GrassMatrices[grassInstanceID], float4(positionOS, 1.0)).xyz;
+                #else
+                    return TransformObjectToWorld(positionOS);
+                #endif
+            }
+
             // 顶点输入。
             // positionOS 是草片网格的模型空间顶点位置。
             // uv 当前主要用于片元阶段保留原始 UV，后续如果加贴图会用到。
@@ -219,7 +233,12 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             {
                 float4 positionOS : POSITION;
                 float2 uv : TEXCOORD0;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
+
+                #if defined(GRASS_INDIRECT)
+                    uint instanceID : SV_InstanceID;
+                #else
+                    UNITY_VERTEX_INPUT_INSTANCE_ID
+                #endif
             };
 
             // 顶点到片元的数据。
@@ -444,12 +463,12 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             // 构造朝向摄像机的 billboard 顶点世界坐标。
             // 它会以草根为 pivot，用摄像机 right/up 重新展开草片，再叠加随机宽高。
             // _EnableBillboard 为 0 时返回原始网格世界坐标，为 1 时完全使用 billboard 坐标。
-            float3 BuildBillboardPositionWS(float3 positionOS,float heightOS,float3 heightAxisOS,float heightRandom,float widthRandom)
+            float3 BuildBillboardPositionWS(float3 positionOS,float heightOS,float3 heightAxisOS,float heightRandom,float widthRandom,uint grassInstanceID)
             {
-                float3 originalPositionWS = TransformObjectToWorld(positionOS);
+                float3 originalPositionWS = GrassTransformObjectToWorld(positionOS, grassInstanceID);
 
                 float3 rootOS = heightAxisOS * _GrassHeightMinOS;
-                float3 rootWS = TransformObjectToWorld(rootOS);
+                float3 rootWS = GrassTransformObjectToWorld(rootOS, grassInstanceID);
 
                 float3 cameraRightWS = normalize(UNITY_MATRIX_V[0].xyz);
                 float3 cameraUpWS = normalize(UNITY_MATRIX_V[1].xyz);
@@ -546,15 +565,22 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             // 5. 叠加风、径向摊开、弧形上拱和压平。
             Varyings vert(Attributes input)
             {
-                UNITY_SETUP_INSTANCE_ID(input);
+                #if !defined(GRASS_INDIRECT)
+                    UNITY_SETUP_INSTANCE_ID(input);
+                #endif
 
                 Varyings output;
 
                 float3 positionOS = input.positionOS.xyz;
+                uint grassInstanceID = 0;
+
+                #if defined(GRASS_INDIRECT)
+                    grassInstanceID = input.instanceID;
+                #endif
 
                 // 每株草的 pivot。GPU Instancing 时，不同实例的 ObjectToWorld 不同，
                 // 所以这里可以用 pivotWS 生成每株草稳定但不同的随机数。
-                float3 pivotWS = TransformObjectToWorld(float3(0, 0, 0));
+                float3 pivotWS = GrassTransformObjectToWorld(float3(0, 0, 0), grassInstanceID);
 
                 float3 heightAxisOS = SafeNormalize3(_GrassHeightAxisOS.xyz, float3(0, 0, 1));
 
@@ -572,11 +598,11 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
                 float heightRandom = lerp(_RandomHeightMin, _RandomHeightMax, heightRandom01);
                 float widthRandom = lerp(_RandomWidthMin, _RandomWidthMax, widthRandom01);
 
-                float3 positionWS = BuildBillboardPositionWS(positionOS,heightOS,heightAxisOS,heightRandom,widthRandom);
+                float3 positionWS = BuildBillboardPositionWS(positionOS,heightOS,heightAxisOS,heightRandom,widthRandom,grassInstanceID);
 
                 // 用草根位置采样压草信息，保证同一株草的所有顶点使用一致的交互状态。
                 float3 rootOS = heightAxisOS * _GrassHeightMinOS;
-                float3 rootWS = TransformObjectToWorld(rootOS);
+                float3 rootWS = GrassTransformObjectToWorld(rootOS, grassInstanceID);
 
                 // 历史压草 mask，来自交互 RT。
                 float rtBendMask = saturate(SampleGrassInteraction(rootWS) * _BendStrength);
