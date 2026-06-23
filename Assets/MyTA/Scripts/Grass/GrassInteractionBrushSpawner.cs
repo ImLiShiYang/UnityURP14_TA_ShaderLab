@@ -428,10 +428,11 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     // ============================================================
 
     private bool SpawnGrassBrush(
-        bool isLeftFoot,
-        Transform footTransform,
-        Transform toeTransform)
+    bool isLeftFoot,
+    Transform footTransform,
+    Transform toeTransform)
     {
+        // 没有刷子预制体就无法生成压草 Brush
         if (brushPrefab == null)
             return false;
 
@@ -441,6 +442,8 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         Vector3 toeBonePosition = Vector3.zero;
         bool hasToe = toeTransform != null;
 
+        // 优先使用传入的脚骨骼位置。
+        // 如果脚骨骼为空，就根据角色中心和左右偏移估算脚的位置，作为兜底。
         if (footTransform != null)
         {
             footBonePosition = footTransform.position;
@@ -460,6 +463,8 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             footBonePosition = rootPosition + right * side;
         }
 
+        // 默认使用脚骨骼位置作为刷子检测中心。
+        // 如果有脚趾骨骼，则在脚骨骼和脚趾骨骼之间插值，让生成点更接近脚掌中心。
         Vector3 footCenterPosition = footBonePosition;
 
         if (hasToe)
@@ -468,12 +473,16 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             footCenterPosition = Vector3.Lerp(footBonePosition, toeBonePosition, toeBlend);
         }
 
+        // 从脚中心上方往下发射射线，用来找到真实地面位置。
+        // 这样可以避免脚骨骼本身在地面上方或下方时生成点不稳定。
         Vector3 rayOrigin = footCenterPosition + Vector3.up * rayStartHeight;
         float totalRayDistance = rayStartHeight + rayDistance;
         Vector3 rayEnd = rayOrigin + Vector3.down * totalRayDistance;
 
         Vector2 currentBrushSize = GetCurrentGrassBrushSize();
 
+        // 向下检测地面。
+        // 只有命中 groundMask 指定的地面层，才会继续生成 Brush。
         if (!Physics.Raycast(
                 rayOrigin,
                 Vector3.down,
@@ -482,6 +491,7 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
                 groundMask,
                 QueryTriggerInteraction.Ignore))
         {
+            // 射线没命中时也缓存调试数据，方便在 Scene 视图中查看射线位置和失败原因。
             CacheDebugData(
                 debugFootSide,
                 footBonePosition,
@@ -512,8 +522,12 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             return false;
         }
 
+        // 命中的地面法线。
+        // 后面会用它让 Brush 贴合斜坡或地面。
         Vector3 normal = hit.normal;
 
+        // 可选的表面遮罩检测。
+        // 用来限制只有草地区域可以生成 Brush，比如石头、道路、水面上不生成压草。
         if (useSurfaceMask && grassSurfaceMask != null)
         {
             if (!CanSurfaceSpawnAt(hit.point))
@@ -525,12 +539,20 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             }
         }
 
+        // 计算脚在当前地表上的前方向和右方向。
+        // forwardOnSurface 用来决定 Brush 朝向。
+        // rightOnSurface 用来做左右局部偏移。
         Vector3 forwardOnSurface = GetFootForwardOnSurface(footTransform, toeTransform, normal);
         Vector3 rightOnSurface = Vector3.Cross(forwardOnSurface, normal).normalized;
 
         float currentForwardOffset = GetCurrentFootForwardOffset();
         Vector2 localOffset = isLeftFoot ? leftLocalOffset : rightLocalOffset;
 
+        // 计算 Brush 最终生成位置。
+        // hit.point 是地面命中点。
+        // currentForwardOffset 可以把 Brush 往脚前方推一点。
+        // localOffset 用来分别微调左右脚的局部位置。
+        // surfaceOffset 让 Brush 稍微离开地面，避免和地面 Z-Fighting。
         Vector3 spawnPosition =
             hit.point +
             forwardOnSurface * currentForwardOffset +
@@ -538,14 +560,21 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             forwardOnSurface * localOffset.y +
             normal * surfaceOffset;
 
+        // 让 Brush 贴合地面。
+        // -normal 作为 forward，通常是为了让 Brush 平面朝向地面。
+        // forwardOnSurface 作为 up，用来控制 Brush 在地面上的旋转朝向。
         Quaternion spawnRotation = Quaternion.LookRotation(-normal, forwardOnSurface);
 
+        // 在地面法线方向上额外旋转，用来修正刷子预制体本身的朝向。
+        // 左右脚也可以有各自的角度偏移。
         float yawOffset =
             grassBrushYawOffset +
             (isLeftFoot ? leftYawOffset : rightYawOffset);
 
         spawnRotation = Quaternion.AngleAxis(yawOffset, normal) * spawnRotation;
 
+        // 缓存本次成功生成的调试数据。
+        // 这些数据可以用于 Gizmos 可视化：脚位置、射线、命中点、Brush 方向和大小等。
         CacheDebugData(
             debugFootSide,
             footBonePosition,
@@ -564,13 +593,19 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             currentBrushSize
         );
 
+        // 根据当前状态决定 Brush 大小。
+        // overrideBrushScale 为 true 时使用代码计算的大小，否则使用预制体原本的缩放。
         Vector3 brushScale = overrideBrushScale
             ? new Vector3(currentBrushSize.x, currentBrushSize.y, 1f)
             : brushPrefab.transform.localScale;
 
+        // 实例化 Brush。
+        // 这个 Brush 本身不负责压弯草，而是会被交互 RT 相机 / RenderFeature 渲染到 RT 中。
         GameObject brush = Instantiate(brushPrefab, spawnPosition, spawnRotation);
         brush.transform.localScale = brushScale;
 
+        // 设置 Brush 所在 Layer。
+        // 通常交互 RT 相机会只渲染这个 Layer，从而把 Brush 写入 GrassInteractionTex。
         int brushLayer = LayerMask.NameToLayer(brushLayerName);
 
         if (brushLayer >= 0)
@@ -582,8 +617,11 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             Debug.LogWarning($"[GrassInteractionBrushSpawner] 找不到 Layer: {brushLayerName}", this);
         }
 
+        // Brush 只是写 RT 用的辅助物体，不应该参与正常场景阴影。
         DisableBrushShadows(brush);
 
+        // Brush 只需要短时间存在。
+        // 如果 RT 是累积式的，Brush 被销毁后压痕仍然会保留在 RT 中。
         Destroy(brush, Mathf.Max(0.001f, brushLife));
 
         if (logSpawn)

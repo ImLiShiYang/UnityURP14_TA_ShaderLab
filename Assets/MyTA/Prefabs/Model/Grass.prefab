@@ -12,8 +12,8 @@ GameObject:
   - component: {fileID: 7483883529117372240}
   - component: {fileID: 9133313256184181441}
   - component: {fileID: 2783552006130153670}
-  - component: {fileID: 5001304046195048094}
   - component: {fileID: 30775292042886580}
+  - component: {fileID: 6564607853988412616}
   m_Layer: 0
   m_HasEditorInfo: 1
   m_Name: Grass
@@ -497,7 +497,7 @@ MonoBehaviour:
   m_PreserveMeshAssetOnDestroy: 0
   assetGuid: 
   m_Mesh: {fileID: 0}
-  m_VersionIndex: 10741
+  m_VersionIndex: 10744
   m_IsSelectable: 1
   m_SelectedFaces: 
   m_SelectedEdges: []
@@ -577,14 +577,6 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &5001304046195048094
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 953114775099712781}
-  m_Mesh: {fileID: 0}
 --- !u!64 &30775292042886580
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -607,3 +599,15 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 0}
+--- !u!114 &6564607853988412616
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 953114775099712781}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4d8c8b1c58a6c824fbc98252a1eebd3d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 

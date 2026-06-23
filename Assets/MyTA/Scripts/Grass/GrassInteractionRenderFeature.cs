@@ -3,16 +3,6 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
-/// <summary>
-/// 草地交互 RenderFeature。
-///
-/// 第一阶段只做一件事：
-/// 每次 GrassInteractionCamera 渲染时，
-/// 先把 GrassInteraction_CurrentBrush_RT 清成黑色，
-/// 再把 GrassInteractionBrush Layer 里的 Brush 画进去。
-///
-/// 这个版本暂时不做累积、不做恢复、不做草弯曲。
-/// </summary>
 public class GrassInteractionRenderFeature : ScriptableRendererFeature
 {
     public enum QueueMode
