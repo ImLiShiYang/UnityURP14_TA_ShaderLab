@@ -25,11 +25,26 @@ public class InstancedGrassRenderer : MonoBehaviour
         DrawMeshInstancedIndirect
     }
 
+    private enum DensityLodLevel
+    {
+        Near = 0,
+        Mid = 1,
+        Far = 2
+    }
+
     // Unity 的 Graphics.DrawMeshInstanced 单次最多绘制 1023 个实例。
     // 超过这个数量时，需要拆成多个 draw batch。
     private const int MaxInstancesPerDrawCall = 1023;
     private static readonly int GrassMatricesId = Shader.PropertyToID("_GrassMatrices");
     private static readonly int UseIndirectGrassId = Shader.PropertyToID("_UseIndirectGrass");
+    private static readonly int AllGrassMatricesId = Shader.PropertyToID("_AllGrassMatrices");
+    private static readonly int VisibleGrassMatricesId = Shader.PropertyToID("_VisibleGrassMatrices");
+    private static readonly int InstanceCountId = Shader.PropertyToID("_InstanceCount");
+    private static readonly int FrustumPlanesId = Shader.PropertyToID("_FrustumPlanes");
+    private static readonly int CameraPositionWSId = Shader.PropertyToID("_CameraPositionWS");
+    private static readonly int MaxDrawDistanceId = Shader.PropertyToID("_MaxDrawDistance");
+    private static readonly int CullRadiusId = Shader.PropertyToID("_CullRadius");
+    private const int GpuCullThreadGroupSize = 64;
     private const string GrassIndirectKeyword = "GRASS_INDIRECT";
 
     [Header("Target")]
@@ -90,6 +105,37 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Min(1)]
     public int maxNewChunksPerUpdate = 4;
 
+    [Header("Density LOD")]
+    [Tooltip("根据 Chunk 到 target 的距离降低远处草密度。")]
+    public bool enableDensityLod = true;
+
+    [Tooltip("从这个距离开始使用中距离密度。")]
+    [Min(0f)]
+    public float midLodStartDistance = 10f;
+
+    [Tooltip("从这个距离开始使用远距离密度。")]
+    [Min(0f)]
+    public float farLodStartDistance = 16f;
+
+    [Tooltip("近处 Chunk 的密度倍率。")]
+    [Range(0.01f, 1f)]
+    public float nearLodDensity = 1f;
+
+    [Tooltip("中距离 Chunk 的密度倍率。")]
+    [Range(0.01f, 1f)]
+    public float midLodDensity = 0.6f;
+
+    [Tooltip("远距离 Chunk 的密度倍率。")]
+    [Range(0.01f, 1f)]
+    public float farLodDensity = 0.3f;
+
+    [Tooltip("玩家靠近已有低密度 Chunk 时，是否把它重建成更高密度。只升级，不主动降级，减少闪烁。")]
+    public bool upgradeLoadedChunksToCloserLod = true;
+
+    [Tooltip("每次无限加载检查最多升级多少个已有 Chunk，避免靠近时瞬间重建太多。")]
+    [Min(0)]
+    public int maxLodUpgradesPerUpdate = 2;
+
     [Header("Culling")]
     [Tooltip("用于视锥剔除的主相机。不填时会自动使用 Camera.main。")]
     public Camera cullingCamera;
@@ -103,6 +149,21 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     [Tooltip("选中物体时用绿色显示可见 Chunk，用灰色显示被剔除 Chunk。")]
     public bool showCullingStateInGizmos = true;
+
+    [Header("GPU Instance Culling")]
+    [Tooltip("只在 DrawMeshInstancedIndirect 模式下生效。CPU 仍然管理 chunk，Compute Shader 再剔除 chunk 内不可见的草。")]
+    public bool enableGpuInstanceCulling = false;
+
+    [Tooltip("负责把当前 chunk 内可见草筛到 Visible Matrix Buffer 的 Compute Shader。")]
+    public ComputeShader gpuInstanceCullShader;
+
+    [Tooltip("GPU 草实例剔除距离。0 表示只做视锥剔除，不额外按距离剔除。")]
+    [Min(0f)]
+    public float gpuCullMaxDistance = 0f;
+
+    [Tooltip("每棵草用于 GPU 视锥剔除的近似包围球半径。太小会边缘闪烁，太大会少剔除。")]
+    [Min(0f)]
+    public float gpuCullBoundsRadius = 1.5f;
 
     [Header("Raycast")]
     [Tooltip("从随机点上方多高开始向下打射线。")]
@@ -165,7 +226,7 @@ public class InstancedGrassRenderer : MonoBehaviour
     public KeyCode debugPanelToggleKey = KeyCode.F8;
 
     [Tooltip("调试面板在屏幕上的位置和大小。")]
-    public Rect debugPanelRect = new Rect(12f, 80f, 330f, 310f);
+    public Rect debugPanelRect = new Rect(12f, 80f, 340f, 360f);
 
     // 第二步：不再把所有草放进一个大列表，而是按世界坐标分到多个 Chunk。
     // 下一步做视锥剔除时，就可以按 chunk.bounds 判断“整块画 / 整块不画”。
@@ -178,14 +239,19 @@ public class InstancedGrassRenderer : MonoBehaviour
     private int visibleChunkCount;
     private int visibleInstanceCount;
     private readonly Plane[] frustumPlanes = new Plane[6];
+    private readonly Vector4[] gpuFrustumPlaneVectors = new Vector4[6];
     private float nextInfiniteUpdateTime;
     private GrassRenderMode lastAppliedRenderMode;
     private bool hasAppliedRenderMode;
+    private int gpuCullKernel = -1;
+    private int gpuCulledChunkCount;
+    private bool warnedMissingGpuCullShader;
     private float debugFps;
     private float debugFrameMs;
     private int lastInfiniteCreatedChunks;
     private int lastInfiniteRemovedChunks;
     private int lastInfiniteCreatedInstances;
+    private int lastLodUpgradedChunks;
     private float lastInfiniteUpdateMs;
 
     public int GeneratedCount => generatedCount;
@@ -194,6 +260,7 @@ public class InstancedGrassRenderer : MonoBehaviour
     public int ChunkCount => chunks.Count;
     public int VisibleChunkCount => visibleChunkCount;
     public int VisibleInstanceCount => visibleInstanceCount;
+    public int GpuCulledChunkCount => gpuCulledChunkCount;
 
     private void Awake()
     {
@@ -243,6 +310,15 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private void OnValidate()
     {
+#if UNITY_EDITOR
+        if (gpuInstanceCullShader == null)
+        {
+            gpuInstanceCullShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Assets/MyTA/Shaders/Grass/GrassInstanceCull.compute"
+            );
+        }
+#endif
+
         // 保证缩放范围合法。
         if (maxScale < minScale)
             maxScale = minScale;
@@ -253,8 +329,17 @@ public class InstancedGrassRenderer : MonoBehaviour
         if (loadRadius < chunkSize)
             loadRadius = chunkSize;
 
+        if (farLodStartDistance < midLodStartDistance)
+            farLodStartDistance = midLodStartDistance;
+
         if (cullingBoundsPadding < 0f)
             cullingBoundsPadding = 0f;
+
+        if (gpuCullMaxDistance < 0f)
+            gpuCullMaxDistance = 0f;
+
+        if (gpuCullBoundsRadius < 0f)
+            gpuCullBoundsRadius = 0f;
 
         // 高度轴不能是 0 向量，否则后面 normalized 会出问题。
         if (meshHeightAxis.sqrMagnitude < 0.0001f)
@@ -309,6 +394,7 @@ public class InstancedGrassRenderer : MonoBehaviour
         lastInfiniteCreatedChunks = 0;
         lastInfiniteRemovedChunks = 0;
         lastInfiniteCreatedInstances = 0;
+        lastLodUpgradedChunks = 0;
         lastInfiniteUpdateMs = 0f;
 
         if (target == null)
@@ -334,10 +420,10 @@ public class InstancedGrassRenderer : MonoBehaviour
         {
             UpdateInfiniteChunks(true);
 
-            Debug.Log(
-                $"[InstancedGrassRenderer] Infinite mode generated {GeneratedCount} grass instances, chunks={ChunkCount}, drawCalls={DrawCallCount}.",
-                this
-            );
+            // Debug.Log(
+            //     $"[InstancedGrassRenderer] Infinite mode generated {GeneratedCount} grass instances, chunks={ChunkCount}, drawCalls={DrawCallCount}.",
+            //     this
+            // );
 
             return;
         }
@@ -452,6 +538,27 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         int generatedThisUpdate = 0;
         int generatedInstancesThisUpdate = 0;
+        int upgradedThisUpdate = 0;
+
+        if (upgradeLoadedChunksToCloserLod && maxLodUpgradesPerUpdate > 0)
+        {
+            foreach (Vector2Int coord in desiredCoords)
+            {
+                if (!chunks.TryGetValue(coord, out GrassChunk chunk))
+                    continue;
+
+                DensityLodLevel desiredLod = GetDensityLodLevel(coord, center);
+
+                if (desiredLod >= chunk.densityLodLevel)
+                    continue;
+
+                generatedInstancesThisUpdate += RebuildChunk(chunk, desiredLod);
+                upgradedThisUpdate++;
+
+                if (!generateAllMissing && upgradedThisUpdate >= maxLodUpgradesPerUpdate)
+                    break;
+            }
+        }
 
         foreach (Vector2Int coord in desiredCoords)
         {
@@ -470,12 +577,27 @@ public class InstancedGrassRenderer : MonoBehaviour
         lastInfiniteCreatedChunks = generatedThisUpdate;
         lastInfiniteRemovedChunks = coordsToRemove.Count;
         lastInfiniteCreatedInstances = generatedInstancesThisUpdate;
+        lastLodUpgradedChunks = upgradedThisUpdate;
         lastInfiniteUpdateMs = (Time.realtimeSinceStartup - updateStartTime) * 1000f;
     }
 
     private int GenerateChunk(Vector2Int coord)
     {
         GrassChunk chunk = GetOrCreateChunk(coord);
+        DensityLodLevel lodLevel = GetDensityLodLevel(coord, target.position);
+        return PopulateChunk(chunk, lodLevel);
+    }
+
+    private int RebuildChunk(GrassChunk chunk, DensityLodLevel lodLevel)
+    {
+        generatedCount -= chunk.InstanceCount;
+        chunk.Clear(chunkSize);
+        return PopulateChunk(chunk, lodLevel);
+    }
+
+    private int PopulateChunk(GrassChunk chunk, DensityLodLevel lodLevel)
+    {
+        Vector2Int coord = chunk.coord;
         System.Random random = new System.Random(GetChunkSeed(coord));
         Quaternion baseRotation = Quaternion.Euler(baseRotationEuler);
         Vector3 rootLocalOffset = alignMeshRootToGround
@@ -486,10 +608,15 @@ public class InstancedGrassRenderer : MonoBehaviour
         float minX = coord.x * safeChunkSize;
         float minZ = coord.y * safeChunkSize;
         float rayY = target.position.y + raycastHeight;
-        int maxAttempts = Mathf.Max(instancesPerChunk * 8, instancesPerChunk);
+        int targetInstanceCount = GetTargetInstanceCount(lodLevel);
+        int maxAttempts = Mathf.Max(targetInstanceCount * 8, targetInstanceCount);
         int generatedInChunk = 0;
 
-        for (int attempt = 0; attempt < maxAttempts && generatedInChunk < instancesPerChunk; attempt++)
+        chunk.densityLodLevel = lodLevel;
+        chunk.densityMultiplier = GetDensityMultiplier(lodLevel);
+        chunk.targetInstanceCount = targetInstanceCount;
+
+        for (int attempt = 0; attempt < maxAttempts && generatedInChunk < targetInstanceCount; attempt++)
         {
             Vector3 rayOrigin = new Vector3(
                 minX + RandomRange(random, 0f, safeChunkSize),
@@ -598,14 +725,20 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         int layer = gameObject.layer;
+        bool useGpuInstanceCulling = IsGpuInstanceCullingActive();
         bool useFrustumCulling = enableFrustumCulling && cullingCamera != null;
+        bool needsFrustumPlanes = (useFrustumCulling || useGpuInstanceCulling) && cullingCamera != null;
 
-        if (useFrustumCulling)
+        if (needsFrustumPlanes)
             GeometryUtility.CalculateFrustumPlanes(cullingCamera, frustumPlanes);
+
+        if (useGpuInstanceCulling)
+            UpdateGpuCullShaderGlobals();
 
         visibleChunkCount = 0;
         visibleInstanceCount = 0;
         submittedDrawCallCount = 0;
+        gpuCulledChunkCount = 0;
 
         foreach (GrassChunk chunk in chunks.Values)
         {
@@ -622,7 +755,20 @@ public class InstancedGrassRenderer : MonoBehaviour
 
                 if (chunk.HasIndirectBuffers)
                 {
-                    grassMaterial.SetBuffer(GrassMatricesId, chunk.MatrixBuffer);
+                    ComputeBuffer drawMatrixBuffer = chunk.MatrixBuffer;
+
+                    if (useGpuInstanceCulling && RunGpuInstanceCulling(chunk))
+                    {
+                        drawMatrixBuffer = chunk.VisibleMatrixBuffer;
+                        gpuCulledChunkCount++;
+                    }
+                    else
+                    {
+                        chunk.ResetIndirectArgsToFull();
+                    }
+
+                    grassMaterial.SetBuffer(GrassMatricesId, drawMatrixBuffer);
+                    chunk.PropertyBlock.SetBuffer(GrassMatricesId, drawMatrixBuffer);
 
                     Graphics.DrawMeshInstancedIndirect(
                         grassMesh,
@@ -663,6 +809,91 @@ public class InstancedGrassRenderer : MonoBehaviour
                 submittedDrawCallCount++;
             }
         }
+    }
+
+    private bool IsGpuInstanceCullingActive()
+    {
+        return renderMode == GrassRenderMode.DrawMeshInstancedIndirect &&
+               enableGpuInstanceCulling &&
+               cullingCamera != null &&
+               EnsureGpuCullKernel();
+    }
+
+    private bool EnsureGpuCullKernel()
+    {
+        if (gpuInstanceCullShader == null)
+        {
+            if (!warnedMissingGpuCullShader)
+            {
+                Debug.LogWarning(
+                    "[InstancedGrassRenderer] GPU instance culling is enabled, but gpuInstanceCullShader is missing.",
+                    this
+                );
+                warnedMissingGpuCullShader = true;
+            }
+
+            return false;
+        }
+
+        if (gpuCullKernel >= 0)
+            return true;
+
+        try
+        {
+            gpuCullKernel = gpuInstanceCullShader.FindKernel("CullGrassInstances");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning(
+                $"[InstancedGrassRenderer] Cannot find compute kernel CullGrassInstances. {exception.Message}",
+                this
+            );
+            gpuCullKernel = -1;
+            return false;
+        }
+
+        return gpuCullKernel >= 0;
+    }
+
+    private void UpdateGpuCullShaderGlobals()
+    {
+        if (gpuInstanceCullShader == null || cullingCamera == null)
+            return;
+
+        for (int i = 0; i < frustumPlanes.Length; i++)
+        {
+            Plane plane = frustumPlanes[i];
+            Vector3 normal = plane.normal;
+            gpuFrustumPlaneVectors[i] = new Vector4(normal.x, normal.y, normal.z, plane.distance);
+        }
+
+        gpuInstanceCullShader.SetVectorArray(FrustumPlanesId, gpuFrustumPlaneVectors);
+        gpuInstanceCullShader.SetVector(CameraPositionWSId, cullingCamera.transform.position);
+        gpuInstanceCullShader.SetFloat(MaxDrawDistanceId, gpuCullMaxDistance);
+        gpuInstanceCullShader.SetFloat(CullRadiusId, gpuCullBoundsRadius);
+    }
+
+    private bool RunGpuInstanceCulling(GrassChunk chunk)
+    {
+        if (chunk == null ||
+            !chunk.HasIndirectBuffers ||
+            !chunk.HasVisibleBuffer ||
+            chunk.InstanceCount <= 0)
+        {
+            return false;
+        }
+
+        chunk.VisibleMatrixBuffer.SetCounterValue(0);
+
+        gpuInstanceCullShader.SetInt(InstanceCountId, chunk.InstanceCount);
+        gpuInstanceCullShader.SetBuffer(gpuCullKernel, AllGrassMatricesId, chunk.MatrixBuffer);
+        gpuInstanceCullShader.SetBuffer(gpuCullKernel, VisibleGrassMatricesId, chunk.VisibleMatrixBuffer);
+
+        int threadGroups = Mathf.CeilToInt(chunk.InstanceCount / (float)GpuCullThreadGroupSize);
+        gpuInstanceCullShader.Dispatch(gpuCullKernel, threadGroups, 1, 1);
+
+        ComputeBuffer.CopyCount(chunk.VisibleMatrixBuffer, chunk.ArgsBuffer, sizeof(uint));
+        return true;
     }
 
     private void BuildDrawBatches()
@@ -777,6 +1008,7 @@ public class InstancedGrassRenderer : MonoBehaviour
         float visibleChunkPercent = ChunkCount > 0
             ? VisibleChunkCount * 100f / ChunkCount
             : 0f;
+        CountDensityLodChunks(out int nearChunkCount, out int midChunkCount, out int farChunkCount);
 
         GUILayout.Label($"FPS: {debugFps:F1}  ({debugFrameMs:F2} ms)");
         GUILayout.Label($"Mode: {renderMode}");
@@ -790,11 +1022,15 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         GUILayout.Label($"Infinite: {(enableInfiniteLoading ? "On" : "Off")}  Load Radius: {loadRadius:F1}");
         GUILayout.Label($"Chunk Size: {chunkSize:F1}  Instances/Chunk: {instancesPerChunk}");
-        GUILayout.Label($"Last Load: +{lastInfiniteCreatedChunks} chunks / -{lastInfiniteRemovedChunks} chunks");
+        GUILayout.Label($"LOD Chunks: Near {nearChunkCount} / Mid {midChunkCount} / Far {farChunkCount}");
+        GUILayout.Label($"LOD Density: {nearLodDensity:F2} / {midLodDensity:F2} / {farLodDensity:F2}");
+        GUILayout.Label($"Last Load: +{lastInfiniteCreatedChunks} chunks / -{lastInfiniteRemovedChunks} chunks / up {lastLodUpgradedChunks} LOD");
         GUILayout.Label($"Last New Grass: {lastInfiniteCreatedInstances}  Cost: {lastInfiniteUpdateMs:F2} ms");
         GUILayout.Space(4f);
 
         GUILayout.Label($"Culling: {(enableFrustumCulling ? "On" : "Off")}  Padding: {cullingBoundsPadding:F1}");
+        GUILayout.Label($"GPU Cull: {(IsGpuInstanceCullingActive() ? "On" : "Off")}  Chunks: {GpuCulledChunkCount}");
+        GUILayout.Label($"GPU Cull Distance: {gpuCullMaxDistance:F1}  Radius: {gpuCullBoundsRadius:F2}");
         GUILayout.Label($"Toggle: {debugPanelToggleKey}   Regenerate: {regenerateKey}");
 
         GUI.DragWindow(new Rect(0f, 0f, 10000f, 20f));
@@ -824,6 +1060,78 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     // 把世界坐标转换成 Chunk 坐标。
     // 这里只看 XZ 平面，因为草地分块是按地面平面划分的。
+    private DensityLodLevel GetDensityLodLevel(Vector2Int coord, Vector3 center)
+    {
+        if (!enableDensityLod)
+            return DensityLodLevel.Near;
+
+        Vector3 chunkCenter = ChunkCoordToWorldCenter(coord, chunkSize, center.y);
+        Vector2 delta = new Vector2(chunkCenter.x - center.x, chunkCenter.z - center.z);
+        float distance = delta.magnitude;
+
+        if (distance >= farLodStartDistance)
+            return DensityLodLevel.Far;
+
+        if (distance >= midLodStartDistance)
+            return DensityLodLevel.Mid;
+
+        return DensityLodLevel.Near;
+    }
+
+    private float GetDensityMultiplier(DensityLodLevel lodLevel)
+    {
+        if (!enableDensityLod)
+            return 1f;
+
+        switch (lodLevel)
+        {
+            case DensityLodLevel.Mid:
+                return Mathf.Clamp01(midLodDensity);
+
+            case DensityLodLevel.Far:
+                return Mathf.Clamp01(farLodDensity);
+
+            case DensityLodLevel.Near:
+            default:
+                return Mathf.Clamp01(nearLodDensity);
+        }
+    }
+
+    private int GetTargetInstanceCount(DensityLodLevel lodLevel)
+    {
+        if (instancesPerChunk <= 0)
+            return 0;
+
+        int targetCount = Mathf.RoundToInt(instancesPerChunk * GetDensityMultiplier(lodLevel));
+        return Mathf.Clamp(targetCount, 1, instancesPerChunk);
+    }
+
+    private void CountDensityLodChunks(out int nearCount, out int midCount, out int farCount)
+    {
+        nearCount = 0;
+        midCount = 0;
+        farCount = 0;
+
+        foreach (GrassChunk chunk in chunks.Values)
+        {
+            switch (chunk.densityLodLevel)
+            {
+                case DensityLodLevel.Mid:
+                    midCount++;
+                    break;
+
+                case DensityLodLevel.Far:
+                    farCount++;
+                    break;
+
+                case DensityLodLevel.Near:
+                default:
+                    nearCount++;
+                    break;
+            }
+        }
+    }
+
     private static Vector2Int WorldToChunkCoord(Vector3 worldPosition, float chunkSize)
     {
         float safeChunkSize = Mathf.Max(chunkSize, 0.0001f);
@@ -870,20 +1178,45 @@ public class InstancedGrassRenderer : MonoBehaviour
         public MaterialPropertyBlock PropertyBlock { get; private set; }
         public ComputeBuffer ArgsBuffer { get; private set; }
         public ComputeBuffer MatrixBuffer => matrixBuffer;
+        public ComputeBuffer VisibleMatrixBuffer => visibleMatrixBuffer;
+        public DensityLodLevel densityLodLevel = DensityLodLevel.Near;
+        public float densityMultiplier = 1f;
+        public int targetInstanceCount;
 
         //这个 Chunk 的包围盒
         public Bounds bounds;
 
         private bool hasBounds;
         private ComputeBuffer matrixBuffer;
+        private ComputeBuffer visibleMatrixBuffer;
         private uint[] indirectArgs;
 
         public int InstanceCount => matrices.Count;
         public bool HasIndirectBuffers => matrixBuffer != null && ArgsBuffer != null && PropertyBlock != null;
+        public bool HasVisibleBuffer => visibleMatrixBuffer != null;
 
         public GrassChunk(Vector2Int coord, float chunkSize)
         {
             this.coord = coord;
+
+            float safeChunkSize = Mathf.Max(chunkSize, 0.0001f);
+            Vector3 center = new Vector3(
+                (coord.x + 0.5f) * safeChunkSize,
+                0f,
+                (coord.y + 0.5f) * safeChunkSize
+            );
+
+            bounds = new Bounds(center, new Vector3(safeChunkSize, 1f, safeChunkSize));
+        }
+
+        public void Clear(float chunkSize)
+        {
+            ReleaseIndirectBuffers();
+
+            matrices.Clear();
+            drawBatches.Clear();
+            drawBatchCounts.Clear();
+            hasBounds = false;
 
             float safeChunkSize = Mathf.Max(chunkSize, 0.0001f);
             Vector3 center = new Vector3(
@@ -950,6 +1283,9 @@ public class InstancedGrassRenderer : MonoBehaviour
             matrixBuffer = new ComputeBuffer(matrices.Count, 64);
             matrixBuffer.SetData(matrices);
 
+            visibleMatrixBuffer = new ComputeBuffer(matrices.Count, 64, ComputeBufferType.Append);
+            visibleMatrixBuffer.SetCounterValue(0);
+
             indirectArgs = new uint[5];
             indirectArgs[0] = mesh.GetIndexCount(safeSubmeshIndex);
             indirectArgs[1] = (uint)matrices.Count;
@@ -964,12 +1300,27 @@ public class InstancedGrassRenderer : MonoBehaviour
             PropertyBlock.SetBuffer(grassMatricesId, matrixBuffer);
         }
 
+        public void ResetIndirectArgsToFull()
+        {
+            if (ArgsBuffer == null || indirectArgs == null)
+                return;
+
+            indirectArgs[1] = (uint)matrices.Count;
+            ArgsBuffer.SetData(indirectArgs);
+        }
+
         public void ReleaseIndirectBuffers()
         {
             if (matrixBuffer != null)
             {
                 matrixBuffer.Release();
                 matrixBuffer = null;
+            }
+
+            if (visibleMatrixBuffer != null)
+            {
+                visibleMatrixBuffer.Release();
+                visibleMatrixBuffer = null;
             }
 
             if (ArgsBuffer != null)

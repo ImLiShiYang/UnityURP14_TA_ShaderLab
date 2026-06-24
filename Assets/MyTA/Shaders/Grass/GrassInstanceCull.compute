@@ -1,0 +1,44 @@
+#pragma kernel CullGrassInstances
+
+StructuredBuffer<float4x4> _AllGrassMatrices;
+AppendStructuredBuffer<float4x4> _VisibleGrassMatrices;
+
+int _InstanceCount;
+float4 _FrustumPlanes[6];
+float3 _CameraPositionWS;
+float _MaxDrawDistance;
+float _CullRadius;
+
+[numthreads(64, 1, 1)]
+void CullGrassInstances(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+
+    if (index >= (uint)_InstanceCount)
+        return;
+
+    float4x4 GrassMatrix = _AllGrassMatrices[index];
+    float3 positionWS = mul(GrassMatrix, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+    float cullRadius = max(_CullRadius, 0.0);
+
+    if (_MaxDrawDistance > 0.0)
+    {
+        float3 cameraDelta = positionWS - _CameraPositionWS;
+        float maxDistance = _MaxDrawDistance + cullRadius;
+
+        if (dot(cameraDelta, cameraDelta) > maxDistance * maxDistance)
+            return;
+    }
+
+    [unroll]
+    for (int i = 0; i < 6; i++)
+    {
+        float4 plane = _FrustumPlanes[i];
+        float signedDistance = dot(plane.xyz, positionWS) + plane.w;
+
+        if (signedDistance < -cullRadius)
+            return;
+    }
+
+    _VisibleGrassMatrices.Append(GrassMatrix);
+}
