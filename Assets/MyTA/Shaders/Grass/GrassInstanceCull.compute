@@ -1,7 +1,17 @@
 #pragma kernel CullGrassInstances
 
-StructuredBuffer<float4x4> _AllGrassMatrices;
-AppendStructuredBuffer<float4x4> _VisibleGrassMatrices;
+struct GrassInstance
+{
+    float3 position;
+    float rotationY;
+
+    float scale;
+    float random;
+    float2 padding;
+};
+
+StructuredBuffer<GrassInstance> _AllGrassInstances;
+AppendStructuredBuffer<GrassInstance> _VisibleGrassInstances;
 
 int _InstanceCount;
 float4 _FrustumPlanes[6];
@@ -61,8 +71,8 @@ void CullGrassInstances(uint3 id : SV_DispatchThreadID)
     if (index >= (uint)_InstanceCount)
         return;
 
-    float4x4 GrassMatrix = _AllGrassMatrices[index];
-    float3 positionWS = mul(GrassMatrix, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+    GrassInstance grass = _AllGrassInstances[index];
+    float3 positionWS = grass.position;
     float cullRadius = max(_CullRadius, 0.0);
 
     if (_MaxDrawDistance > 0.0)
@@ -76,7 +86,7 @@ void CullGrassInstances(uint3 id : SV_DispatchThreadID)
     
     float dist = length(positionWS - _CameraPositionWS);
     float density = GetDensityByDistance(dist);
-    float randomValue = Hash01(positionWS.xz);
+    float randomValue = grass.random;
 
     if (randomValue > density)
         return;
@@ -91,7 +101,7 @@ void CullGrassInstances(uint3 id : SV_DispatchThreadID)
             return;
     }
 
-    _VisibleGrassMatrices.Append(GrassMatrix);
+    _VisibleGrassInstances.Append(grass);
 }
 
 

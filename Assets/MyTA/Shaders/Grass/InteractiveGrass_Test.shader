@@ -214,15 +214,49 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
             CBUFFER_END
 
             #if defined(GRASS_INDIRECT)
-                StructuredBuffer<float4x4> _GrassMatrices;
+
+                struct GrassInstance
+                {
+                    float3 position;
+                    float rotationY;
+
+                    float scale;
+                    float random;
+                    float2 padding;
+                };
+
+                StructuredBuffer<GrassInstance> _GrassInstances;
             #endif
+
 
             float3 GrassTransformObjectToWorld(float3 positionOS, uint grassInstanceID)
             {
                 #if defined(GRASS_INDIRECT)
-                    return mul(_GrassMatrices[grassInstanceID], float4(positionOS, 1.0)).xyz;
+
+                    GrassInstance grass = _GrassInstances[grassInstanceID];
+
+                    // 对应 C# 里的 baseRotationEuler = (-90, 0, 0)。
+                    // 当前草模型本地 Z 是高度轴，所以这里把本地 Z 转成世界 Y。
+                    float3 p = float3(positionOS.x, positionOS.z, -positionOS.y);
+
+                    p *= grass.scale;
+
+                    float s;
+                    float c;
+                    sincos(grass.rotationY, s, c);
+
+                    // 对应 Unity 的 Y 轴旋转。
+                    float3 rotated;
+                    rotated.x = p.x * c + p.z * s;
+                    rotated.y = p.y;
+                    rotated.z = -p.x * s + p.z * c;
+
+                    return rotated + grass.position;
+
                 #else
+
                     return TransformObjectToWorld(positionOS);
+
                 #endif
             }
 
