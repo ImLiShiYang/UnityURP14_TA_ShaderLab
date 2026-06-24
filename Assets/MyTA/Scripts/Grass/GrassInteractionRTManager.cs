@@ -253,7 +253,7 @@ public class GrassInteractionRTManager : MonoBehaviour
         {
             depthBufferBits = 0,
             msaaSamples = 1,
-            colorFormat = RenderTextureFormat.ARGB32,
+            colorFormat = RenderTextureFormat.ARGBHalf,
             sRGB = false,
             useMipMap = false,
             autoGenerateMips = false
@@ -435,9 +435,8 @@ public class GrassInteractionRTManager : MonoBehaviour
         // recoveryTime 表示从完全压弯恢复到直立需要的时间。
         // recoveryTime = 3 时，每秒大约恢复 1/3。
         // recoveryTime = 0 时，decayAmount = 0，表示历史压痕不自动恢复。
-        float decayAmount = recoveryTime > 0.0001f
-            ? Time.deltaTime / recoveryTime
-            : 0f;
+        float decayAmount = recoveryTime > 0.0001f? Time.deltaTime / recoveryTime: 0f;
+        
 
         // 根据本帧实际应用的 RT 偏移，计算累积 Shader 当前对应的世界空间范围。
         // 这个 rect 会传给累积 Shader，用于把脚的世界坐标映射到 RT UV。

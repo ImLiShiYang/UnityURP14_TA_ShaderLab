@@ -157,6 +157,16 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Tooltip("按下这个键重新生成当前这批草。")]
     public KeyCode regenerateKey = KeyCode.G;
 
+    [Header("Debug Panel")]
+    [Tooltip("运行时显示无限草调试面板。")]
+    public bool showDebugPanel = true;
+
+    [Tooltip("运行时开关调试面板的快捷键。")]
+    public KeyCode debugPanelToggleKey = KeyCode.F8;
+
+    [Tooltip("调试面板在屏幕上的位置和大小。")]
+    public Rect debugPanelRect = new Rect(12f, 80f, 330f, 310f);
+
     // 第二步：不再把所有草放进一个大列表，而是按世界坐标分到多个 Chunk。
     // 下一步做视锥剔除时，就可以按 chunk.bounds 判断“整块画 / 整块不画”。
     private readonly Dictionary<Vector2Int, GrassChunk> chunks =
@@ -164,15 +174,23 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private int generatedCount;
     private int drawCallCount;
+    private int submittedDrawCallCount;
     private int visibleChunkCount;
     private int visibleInstanceCount;
     private readonly Plane[] frustumPlanes = new Plane[6];
     private float nextInfiniteUpdateTime;
     private GrassRenderMode lastAppliedRenderMode;
     private bool hasAppliedRenderMode;
+    private float debugFps;
+    private float debugFrameMs;
+    private int lastInfiniteCreatedChunks;
+    private int lastInfiniteRemovedChunks;
+    private int lastInfiniteCreatedInstances;
+    private float lastInfiniteUpdateMs;
 
     public int GeneratedCount => generatedCount;
     public int DrawCallCount => drawCallCount;
+    public int SubmittedDrawCallCount => submittedDrawCallCount;
     public int ChunkCount => chunks.Count;
     public int VisibleChunkCount => visibleChunkCount;
     public int VisibleInstanceCount => visibleInstanceCount;
@@ -202,6 +220,11 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private void Update()
     {
+        UpdateDebugTiming();
+
+        if (Input.GetKeyDown(debugPanelToggleKey))
+            showDebugPanel = !showDebugPanel;
+
         // 调试用：运行时按 G 重新撒草。
         // 方便你修改半径、数量、地面 Layer 后快速看效果。
         if (Input.GetKeyDown(regenerateKey))
@@ -283,6 +306,10 @@ public class InstancedGrassRenderer : MonoBehaviour
         visibleChunkCount = 0;
         visibleInstanceCount = 0;
         nextInfiniteUpdateTime = 0f;
+        lastInfiniteCreatedChunks = 0;
+        lastInfiniteRemovedChunks = 0;
+        lastInfiniteCreatedInstances = 0;
+        lastInfiniteUpdateMs = 0f;
 
         if (target == null)
         {
@@ -377,6 +404,8 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private void UpdateInfiniteChunks(bool generateAllMissing)
     {
+        float updateStartTime = Time.realtimeSinceStartup;
+
         if (target == null || grassMesh == null || grassMaterial == null)
             return;
 
@@ -422,13 +451,14 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         int generatedThisUpdate = 0;
+        int generatedInstancesThisUpdate = 0;
 
         foreach (Vector2Int coord in desiredCoords)
         {
             if (chunks.ContainsKey(coord))
                 continue;
 
-            GenerateChunk(coord);
+            generatedInstancesThisUpdate += GenerateChunk(coord);
             generatedThisUpdate++;
 
             if (!generateAllMissing && generatedThisUpdate >= maxNewChunksPerUpdate)
@@ -436,9 +466,14 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         RecalculateDrawCallCount();
+
+        lastInfiniteCreatedChunks = generatedThisUpdate;
+        lastInfiniteRemovedChunks = coordsToRemove.Count;
+        lastInfiniteCreatedInstances = generatedInstancesThisUpdate;
+        lastInfiniteUpdateMs = (Time.realtimeSinceStartup - updateStartTime) * 1000f;
     }
 
-    private void GenerateChunk(Vector2Int coord)
+    private int GenerateChunk(Vector2Int coord)
     {
         GrassChunk chunk = GetOrCreateChunk(coord);
         System.Random random = new System.Random(GetChunkSeed(coord));
@@ -482,6 +517,8 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
             chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassMatricesId);
+
+        return generatedInChunk;
     }
 
     private bool TryCreateGrassInstance(
@@ -568,6 +605,7 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         visibleChunkCount = 0;
         visibleInstanceCount = 0;
+        submittedDrawCallCount = 0;
 
         foreach (GrassChunk chunk in chunks.Values)
         {
@@ -598,6 +636,8 @@ public class InstancedGrassRenderer : MonoBehaviour
                         receiveShadows,
                         layer
                     );
+
+                    submittedDrawCallCount++;
                 }
 
                 continue;
@@ -619,6 +659,8 @@ public class InstancedGrassRenderer : MonoBehaviour
                     receiveShadows,
                     layer
                 );
+
+                submittedDrawCallCount++;
             }
         }
     }
@@ -694,6 +736,68 @@ public class InstancedGrassRenderer : MonoBehaviour
     {
         foreach (GrassChunk chunk in chunks.Values)
             chunk.ReleaseIndirectBuffers();
+    }
+
+    private void UpdateDebugTiming()
+    {
+        float deltaTime = Time.unscaledDeltaTime;
+
+        if (deltaTime <= 0f)
+            return;
+
+        float currentFps = 1f / deltaTime;
+        debugFps = debugFps <= 0f
+            ? currentFps
+            : Mathf.Lerp(debugFps, currentFps, 0.08f);
+
+        debugFrameMs = deltaTime * 1000f;
+    }
+
+    private void OnGUI()
+    {
+        if (!showDebugPanel)
+            return;
+
+        debugPanelRect = GUI.Window(
+            GetInstanceID(),
+            debugPanelRect,
+            DrawDebugPanelWindow,
+            "Grass Debug"
+        );
+    }
+
+    private void DrawDebugPanelWindow(int windowId)
+    {
+        Vector2Int targetChunk = target != null
+            ? WorldToChunkCoord(target.position, chunkSize)
+            : Vector2Int.zero;
+
+        int culledChunkCount = Mathf.Max(0, ChunkCount - VisibleChunkCount);
+        int culledInstanceCount = Mathf.Max(0, GeneratedCount - VisibleInstanceCount);
+        float visibleChunkPercent = ChunkCount > 0
+            ? VisibleChunkCount * 100f / ChunkCount
+            : 0f;
+
+        GUILayout.Label($"FPS: {debugFps:F1}  ({debugFrameMs:F2} ms)");
+        GUILayout.Label($"Mode: {renderMode}");
+        GUILayout.Label($"Target Chunk: ({targetChunk.x}, {targetChunk.y})");
+        GUILayout.Space(4f);
+
+        GUILayout.Label($"Chunks: {ChunkCount}  Visible: {VisibleChunkCount} ({visibleChunkPercent:F1}%)  Culled: {culledChunkCount}");
+        GUILayout.Label($"Instances: {GeneratedCount}  Visible: {VisibleInstanceCount}  Culled: {culledInstanceCount}");
+        GUILayout.Label($"Draw Calls: {SubmittedDrawCallCount} submitted / {DrawCallCount} loaded");
+        GUILayout.Space(4f);
+
+        GUILayout.Label($"Infinite: {(enableInfiniteLoading ? "On" : "Off")}  Load Radius: {loadRadius:F1}");
+        GUILayout.Label($"Chunk Size: {chunkSize:F1}  Instances/Chunk: {instancesPerChunk}");
+        GUILayout.Label($"Last Load: +{lastInfiniteCreatedChunks} chunks / -{lastInfiniteRemovedChunks} chunks");
+        GUILayout.Label($"Last New Grass: {lastInfiniteCreatedInstances}  Cost: {lastInfiniteUpdateMs:F2} ms");
+        GUILayout.Space(4f);
+
+        GUILayout.Label($"Culling: {(enableFrustumCulling ? "On" : "Off")}  Padding: {cullingBoundsPadding:F1}");
+        GUILayout.Label($"Toggle: {debugPanelToggleKey}   Regenerate: {regenerateKey}");
+
+        GUI.DragWindow(new Rect(0f, 0f, 10000f, 20f));
     }
 
     private void OnDestroy()

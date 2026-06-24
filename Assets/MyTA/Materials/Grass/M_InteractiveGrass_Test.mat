@@ -11,7 +11,8 @@ Material:
   m_Shader: {fileID: 4800000, guid: 7f11f79dc75b81c4f8210575ffa8fe70, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords: []
+  m_ValidKeywords:
+  - GRASS_INDIRECT
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
@@ -153,12 +154,12 @@ Material:
     - _BaseColor: {r: 0.18, g: 0.55, b: 0.08, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _GrassBendDirWS: {r: -0.31896007, g: 0, b: 0.94776815, a: 0}
+    - _GrassBendDirWS: {r: 0, g: 0, b: 1, a: 0}
     - _GrassHeightAxisOS: {r: 0, g: 0, b: 1, a: 0}
-    - _GrassInteractionRect: {r: -7.0880003, g: 3.875, b: 8.912, a: 19.875}
+    - _GrassInteractionRect: {r: -8.963, g: -8, b: 7.037, a: 8}
     - _GroundColor: {r: 0.05, g: 0.12, b: 0.03, a: 1}
-    - _PressCenter0WS: {r: 0.650177, g: 0, b: 11.920364, a: 0}
-    - _PressCenter1WS: {r: 1.0404587, g: 0, b: 11.945221, a: 0}
+    - _PressCenter0WS: {r: -1.1893082, g: 0, b: 0.12634277, a: 0}
+    - _PressCenter1WS: {r: -0.811203, g: 0, b: 0.030128479, a: 0}
     - _PressCenterWS: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _TipColor: {r: 0.45, g: 1, b: 0.08, a: 1}

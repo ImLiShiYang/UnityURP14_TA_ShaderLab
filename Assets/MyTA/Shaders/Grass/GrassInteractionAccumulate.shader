@@ -16,7 +16,7 @@ Shader "Hidden/Grass/InteractionAccumulate"
 
         // 每帧恢复量。
         // 数值越大，历史压草痕迹消失越快。
-        _DecayAmount ("Recovery Amount Per Frame", Float) = 0
+        _DecayAmount ("当前帧恢复强度", Float) = 0
 
         // RT 边缘淡出强度。
         // 用来避免历史压痕在 RT 边缘出现硬切。
