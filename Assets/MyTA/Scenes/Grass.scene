@@ -629,19 +629,21 @@ MonoBehaviour:
   maxChunksQueuedPerUpdate: 64
   nearChunkBuildBoostRadius: 14
   nearChunkBuildBudgetMultiplier: 3
-  enableDensityLod: 1
-  midLodStartDistance: 12
-  farLodStartDistance: 16
+  enableCPUDensityLod: 0
+  midLodStartDistance: 14
+  farLodStartDistance: 20
   nearLodDensity: 1
   midLodDensity: 0.8
-  farLodDensity: 0.597
+  farLodDensity: 0.6
   upgradeLoadedChunksToCloserLod: 1
   maxLodUpgradesPerUpdate: 2
+  gpuDensityLodFadeRange: 3
   cullingCamera: {fileID: 1451020792}
   enableFrustumCulling: 1
   cullingBoundsPadding: 1
   showCullingStateInGizmos: 1
   enableGpuInstanceCulling: 1
+  enableGpuDensityLod: 1
   gpuInstanceCullShader: {fileID: 7200000, guid: 8fd28b6f1a7f4f34bb559bd7fb10f7cb,
     type: 3}
   gpuCullMaxDistance: 0

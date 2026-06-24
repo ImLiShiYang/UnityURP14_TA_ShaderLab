@@ -46,6 +46,10 @@ public class InstancedGrassRenderer : MonoBehaviour
     private static readonly int CullRadiusId = Shader.PropertyToID("_CullRadius");
     private const int GpuCullThreadGroupSize = 64;
     private const string GrassIndirectKeyword = "GRASS_INDIRECT";
+    
+    private static readonly int DensityLodDistancesId = Shader.PropertyToID("_DensityLodDistances");
+    private static readonly int DensityLodValuesId = Shader.PropertyToID("_DensityLodValues");
+    private static readonly int DensityLodFadeRangeId = Shader.PropertyToID("_DensityLodFadeRange");
 
     [Header("Target")]
     [Tooltip("第一版以这个目标为中心生成草。建议拖 Player 根节点。")]
@@ -134,8 +138,8 @@ public class InstancedGrassRenderer : MonoBehaviour
     public int nearChunkBuildBudgetMultiplier = 3;
 
     [Header("Density LOD")]
-    [Tooltip("根据 Chunk 到 target 的距离降低远处草密度。")]
-    public bool enableDensityLod = true;
+    [Tooltip("CPU 根据 Chunk 到 target 的距离降低远处草密度。")]
+    public bool enableCPUDensityLod = true;
 
     [Tooltip("从这个距离开始使用中距离密度。")]
     [Min(0f)]
@@ -163,6 +167,10 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Tooltip("每次无限加载检查最多升级多少个已有 Chunk，避免靠近时瞬间重建太多。")]
     [Min(0)]
     public int maxLodUpgradesPerUpdate = 2;
+    
+    [Tooltip("GPU 距离密度 LOD 的过渡宽度。越大，密度变化越柔和。")]
+    [Min(0f)]
+    public float gpuDensityLodFadeRange = 3f;
 
     [Header("Culling")]
     [Tooltip("用于视锥剔除的主相机。不填时会自动使用 Camera.main。")]
@@ -182,6 +190,9 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Tooltip("只在 DrawMeshInstancedIndirect 模式下生效。CPU 仍然管理 chunk，Compute Shader 再剔除 chunk 内不可见的草。")]
     public bool enableGpuInstanceCulling = false;
 
+    [Tooltip("是否在 Compute Shader 中按距离随机降低草的绘制密度。只在 GPU Instance Culling 生效时有用。")]
+    public bool enableGpuDensityLod = true;
+    
     [Tooltip("负责把当前 chunk 内可见草筛到 Visible Matrix Buffer 的 Compute Shader。")]
     public ComputeShader gpuInstanceCullShader;
 
@@ -1258,6 +1269,23 @@ public class InstancedGrassRenderer : MonoBehaviour
         gpuInstanceCullShader.SetVector(CameraPositionWSId, cullingCamera.transform.position);
         gpuInstanceCullShader.SetFloat(MaxDrawDistanceId, gpuCullMaxDistance);
         gpuInstanceCullShader.SetFloat(CullRadiusId, gpuCullBoundsRadius);
+        
+        gpuInstanceCullShader.SetVector(
+            DensityLodDistancesId,
+            new Vector4(midLodStartDistance, farLodStartDistance, 0f, 0f)
+        );
+
+        gpuInstanceCullShader.SetVector(
+            DensityLodValuesId,
+            new Vector4(
+                enableGpuDensityLod ? nearLodDensity : 1f,
+                enableGpuDensityLod ? midLodDensity : 1f,
+                enableGpuDensityLod ? farLodDensity : 1f,
+                enableGpuDensityLod ? 1f : 0f
+            )
+        );
+
+        gpuInstanceCullShader.SetFloat(DensityLodFadeRangeId, gpuDensityLodFadeRange);
     }
 
     private bool RunGpuInstanceCulling(GrassChunk chunk)
@@ -1473,7 +1501,7 @@ public class InstancedGrassRenderer : MonoBehaviour
     // 这里只看 XZ 平面，因为草地分块是按地面平面划分的。
     private DensityLodLevel GetDensityLodLevel(Vector2Int coord, Vector3 center)
     {
-        if (!enableDensityLod)
+        if (!enableCPUDensityLod)
             return DensityLodLevel.Near;
 
         Vector3 chunkCenter = ChunkCoordToWorldCenter(coord, chunkSize, center.y);
@@ -1491,7 +1519,7 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private float GetDensityMultiplier(DensityLodLevel lodLevel)
     {
-        if (!enableDensityLod)
+        if (!enableCPUDensityLod)
             return 1f;
 
         switch (lodLevel)

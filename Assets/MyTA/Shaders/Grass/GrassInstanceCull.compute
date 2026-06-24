@@ -9,6 +9,50 @@ float3 _CameraPositionWS;
 float _MaxDrawDistance;
 float _CullRadius;
 
+// _DensityLodDistances：
+//     x = midLodStartDistance
+//     y = farLodStartDistance
+//
+// _DensityLodValues：
+//     x = nearLodDensity
+//     y = midLodDensity
+//     z = farLodDensity
+//     w = enableGpuDensityLod ? 1 : 0
+//
+// _DensityLodFadeRange：
+//     LOD 过渡宽度，用来减少明显密度圈
+float4 _DensityLodDistances;
+float4 _DensityLodValues;
+float _DensityLodFadeRange;
+
+float Hash01(float2 p)
+{
+    return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float GetDensityByDistance(float dist)
+{
+    if (_DensityLodValues.w < 0.5)
+        return 1.0;
+
+    float midStart = _DensityLodDistances.x;
+    float farStart = _DensityLodDistances.y;
+
+    float nearDensity = saturate(_DensityLodValues.x);
+    float midDensity = saturate(_DensityLodValues.y);
+    float farDensity = saturate(_DensityLodValues.z);
+
+    float fade = max(_DensityLodFadeRange, 0.0001);
+
+    float midT = smoothstep(midStart - fade, midStart + fade, dist);
+    float farT = smoothstep(farStart - fade, farStart + fade, dist);
+
+    float density = lerp(nearDensity, midDensity, midT);
+    density = lerp(density, farDensity, farT);
+
+    return saturate(density);
+}
+
 [numthreads(64, 1, 1)]
 void CullGrassInstances(uint3 id : SV_DispatchThreadID)
 {
@@ -29,6 +73,13 @@ void CullGrassInstances(uint3 id : SV_DispatchThreadID)
         if (dot(cameraDelta, cameraDelta) > maxDistance * maxDistance)
             return;
     }
+    
+    float dist = length(positionWS - _CameraPositionWS);
+    float density = GetDensityByDistance(dist);
+    float randomValue = Hash01(positionWS.xz);
+
+    if (randomValue > density)
+        return;
 
     [unroll]
     for (int i = 0; i < 6; i++)
@@ -42,3 +93,6 @@ void CullGrassInstances(uint3 id : SV_DispatchThreadID)
 
     _VisibleGrassMatrices.Append(GrassMatrix);
 }
+
+
+
