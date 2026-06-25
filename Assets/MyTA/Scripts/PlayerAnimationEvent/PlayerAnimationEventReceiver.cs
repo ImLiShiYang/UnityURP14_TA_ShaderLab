@@ -95,6 +95,13 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
     [Tooltip("真正负责检测 WaveDetect 点并生成武器水波的脚本。")]
     public WaterRippleWeaponEventTrail weaponWaterRipple;
 
+    [Header("Weapon Grass Cut")]
+    [Tooltip("是否把武器攻击动画事件转发给 GrassWeaponCutTrail。")]
+    public bool enableWeaponGrassCut = true;
+
+    [Tooltip("真正负责检测武器轨迹并生成切草 Brush 的脚本。")]
+    public GrassWeaponCutTrail weaponGrassCut;
+    
 
     // ============================================================
     // Debug
@@ -133,6 +140,12 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
 
         if (weaponWaterRipple == null)
             weaponWaterRipple = GetComponentInChildren<WaterRippleWeaponEventTrail>();
+        
+        if (weaponGrassCut == null)
+            weaponGrassCut = GetComponentInParent<GrassWeaponCutTrail>();
+
+        if (weaponGrassCut == null)
+            weaponGrassCut = GetComponentInChildren<GrassWeaponCutTrail>();
     }
 
 
@@ -240,25 +253,31 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
     /// <summary>
     /// Animation Event 调用：攻击动作进入划水时间段。
     /// </summary>
-    public void BeginWeaponWaterRipple()
+    public void BeginWeapon()
     {
         if (logEvent)
-            Debug.Log("[PlayerAnimationEventReceiver] BeginWeaponWaterRipple", this);
+            Debug.Log("[PlayerAnimationEventReceiver] BeginWeapon", this);
 
         if (enableWeaponWaterRipple && weaponWaterRipple != null)
             weaponWaterRipple.BeginWeaponWaterRipple();
+
+        if (enableWeaponGrassCut && weaponGrassCut != null)
+            weaponGrassCut.BeginWeaponGrassCut();
     }
 
     /// <summary>
     /// Animation Event 调用：攻击动作离开划水时间段。
     /// </summary>
-    public void EndWeaponWaterRipple()
+    public void EndWeapon()
     {
         if (logEvent)
-            Debug.Log("[PlayerAnimationEventReceiver] EndWeaponWaterRipple", this);
+            Debug.Log("[PlayerAnimationEventReceiver] EndWeapon", this);
 
         if (enableWeaponWaterRipple && weaponWaterRipple != null)
             weaponWaterRipple.EndWeaponWaterRipple();
+
+        if (enableWeaponGrassCut && weaponGrassCut != null)
+            weaponGrassCut.EndWeaponGrassCut();
     }
 
     /// <summary>
@@ -266,7 +285,7 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
     /// </summary>
     public void BeginWaterCut()
     {
-        BeginWeaponWaterRipple();
+        BeginWeapon();
     }
 
     /// <summary>
@@ -274,7 +293,7 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
     /// </summary>
     public void EndWaterCut()
     {
-        EndWeaponWaterRipple();
+        EndWeapon();
     }
 
 

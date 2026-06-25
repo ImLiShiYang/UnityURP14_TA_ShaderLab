@@ -77,7 +77,21 @@ public class InstancedGrassRenderer : MonoBehaviour
     private static readonly int DensityLodDistancesId = Shader.PropertyToID("_DensityLodDistances");
     private static readonly int DensityLodValuesId = Shader.PropertyToID("_DensityLodValues");
     private static readonly int DensityLodFadeRangeId = Shader.PropertyToID("_DensityLodFadeRange");
+    
+    private readonly List<GrassInstanceData> globalGrassInstances = new List<GrassInstanceData>();
 
+    private ComputeBuffer globalAllGrassBuffer;
+    private ComputeBuffer globalVisibleGrassBuffer;
+    private ComputeBuffer globalArgsBuffer;
+    private MaterialPropertyBlock globalPropertyBlock;
+    private readonly uint[] globalIndirectArgs = new uint[5];
+
+    private bool globalGrassBufferDirty = true;
+    private int globalGrassBufferCapacity;
+    private int globalReadyChunkCount;
+    private Bounds globalDrawBounds;
+    
+    
     [Header("Target")]
     [Tooltip("第一版以这个目标为中心生成草。建议拖 Player 根节点。")]
     public Transform target;
@@ -253,6 +267,19 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Tooltip("最大可生草坡度。0 只允许水平面，90 允许垂直面。")]
     [Range(0f, 90f)]
     public float maxSlopeAngle = 60f;
+    
+    [Header("Water Exclusion")]
+    [Tooltip("开启后，如果草生成点上方有水面，就不生成草。")]
+    public bool rejectGrassUnderWater = true;
+
+    [Tooltip("水面所在 Layer。水面需要有 Collider，通常是 Water Layer。")]
+    public LayerMask waterMask;
+
+    [Tooltip("从地面点上方多高开始检测水面。")]
+    public float waterCheckHeight = 5f;
+
+    [Tooltip("水面比地面高多少才认为这里在水下。")]
+    public float waterSurfacePadding = 0.02f;
 
     [Header("Transform")]
     [Tooltip("当前草模型本地 Z 是高度轴，所以默认需要 -90 度 X 旋转把草立起来。")]
@@ -620,7 +647,9 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         // 将每个 Chunk 内部的矩阵拆分成 1023 一组的绘制批次。
         BuildDrawBatches();
-
+        
+        MarkGlobalGrassBufferDirty();
+        
         Debug.Log(
             $"[InstancedGrassRenderer] Generated {GeneratedCount}/{instanceCount} grass instances, chunks={ChunkCount}, drawCalls={DrawCallCount}.",
             this
@@ -684,6 +713,8 @@ public class InstancedGrassRenderer : MonoBehaviour
             chunk.Clear(chunkSize);
             chunks.Remove(coord);
             chunkPool.Push(chunk);
+            
+            MarkGlobalGrassBufferDirty();
         }
 
         if (activeChunkBuildJob != null && !desiredChunkCoords.Contains(activeChunkBuildJob.coord))
@@ -1031,7 +1062,8 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
         {
-            job.chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassInstancesId);
+            if (!IsGpuInstanceCullingActive())
+                job.chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassInstancesId);
         }
         else
         {
@@ -1039,6 +1071,7 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         job.chunk.IsReadyForRendering = true;
+        MarkGlobalGrassBufferDirty();
     }
 
     private int GenerateChunk(Vector2Int coord)
@@ -1113,7 +1146,8 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
         {
-            chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassInstancesId);
+            if (!IsGpuInstanceCullingActive())
+                chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassInstancesId);
         }
         else
         {
@@ -1121,9 +1155,29 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         chunk.IsReadyForRendering = true;
+        MarkGlobalGrassBufferDirty();
         return generatedInChunk;
     }
 
+    private bool IsPointUnderWater(Vector3 groundPoint)
+    {
+        Vector3 origin = groundPoint + Vector3.up * Mathf.Max(0.001f, waterCheckHeight);
+        float distance = Mathf.Max(0.001f, waterCheckHeight + waterSurfacePadding + 0.5f);
+
+        if (!Physics.Raycast(
+                origin,
+                Vector3.down,
+                out RaycastHit waterHit,
+                distance,
+                waterMask,
+                QueryTriggerInteraction.Collide))
+        {
+            return false;
+        }
+
+        return waterHit.point.y > groundPoint.y + waterSurfacePadding;
+    }
+    
     private bool TryCreateGrassInstance(
         Vector3 rayOrigin,
         System.Random random,
@@ -1138,18 +1192,33 @@ public class InstancedGrassRenderer : MonoBehaviour
         matrix = Matrix4x4.identity;
         rootPosition = Vector3.zero;
 
-        // 从上往下打射线，找到草应该落到的地面位置。
+        int placementMask = rejectGrassUnderWater
+            ? groundMask.value | waterMask.value
+            : groundMask.value;
+
+        QueryTriggerInteraction triggerInteraction = rejectGrassUnderWater
+            ? QueryTriggerInteraction.Collide
+            : QueryTriggerInteraction.Ignore;
+
         if (!Physics.Raycast(
                 rayOrigin,
                 Vector3.down,
                 out RaycastHit hit,
                 raycastDistance,
-                groundMask,
-                QueryTriggerInteraction.Ignore))
+                placementMask,
+                triggerInteraction))
         {
             return false;
         }
 
+        // 如果从上往下第一个打到的是水，说明水盖在地面上方，这里不长草
+        if (rejectGrassUnderWater && IsLayerInMask(hit.collider.gameObject.layer, waterMask))
+            return false;
+
+        // 安全判断：不是地面层，也不生成草
+        if (!IsLayerInMask(hit.collider.gameObject.layer, groundMask))
+            return false;
+        
         // 过滤太陡的坡面。
         // 比如石壁、垂直墙面不应该长草。
         float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
@@ -1197,6 +1266,11 @@ public class InstancedGrassRenderer : MonoBehaviour
         return true;
     }
 
+    private static bool IsLayerInMask(int layer, LayerMask mask)
+    {
+        return (mask.value & (1 << layer)) != 0;
+    }
+    
     private void DrawGrass()
     {
         if (grassMesh == null || grassMaterial == null)
@@ -1231,6 +1305,13 @@ public class InstancedGrassRenderer : MonoBehaviour
         visibleInstanceCount = 0;
         submittedDrawCallCount = 0;
         gpuCulledChunkCount = 0;
+
+
+        if (useGpuInstanceCulling)
+        {
+            DrawGlobalGpuCulledGrass(layer);
+            return;
+        }
 
         foreach (GrassChunk chunk in chunks.Values)
         {
@@ -1414,7 +1495,8 @@ public class InstancedGrassRenderer : MonoBehaviour
         {
             if (renderMode == GrassRenderMode.DrawMeshInstancedIndirect)
             {
-                chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassInstancesId);
+                if (!IsGpuInstanceCullingActive())
+                    chunk.BuildIndirectBuffers(grassMesh, submeshIndex, GrassInstancesId);
             }
             else
             {
@@ -1489,6 +1571,8 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         chunks.Clear();
+        
+        MarkGlobalGrassBufferDirty();
     }
 
     private void ClearChunkBuildQueue()
@@ -1499,10 +1583,201 @@ public class InstancedGrassRenderer : MonoBehaviour
         activeChunkBuildJob = null;
     }
 
+    private void MarkGlobalGrassBufferDirty()
+    {
+        globalGrassBufferDirty = true;
+    }
+    
+    private void EnsureGlobalGrassBufferCapacity(int instanceCount)
+    {
+        int requiredCapacity = Mathf.Max(1, instanceCount);
+
+        if (globalAllGrassBuffer != null &&
+            globalVisibleGrassBuffer != null &&
+            globalArgsBuffer != null &&
+            globalGrassBufferCapacity >= requiredCapacity)
+        {
+            return;
+        }
+
+        ReleaseGlobalIndirectBuffers();
+
+        globalGrassBufferCapacity = Mathf.NextPowerOfTwo(requiredCapacity);
+
+        globalAllGrassBuffer = new ComputeBuffer(
+            globalGrassBufferCapacity,
+            GrassInstanceStride
+        );
+
+        globalVisibleGrassBuffer = new ComputeBuffer(
+            globalGrassBufferCapacity,
+            GrassInstanceStride,
+            ComputeBufferType.Append
+        );
+
+        globalArgsBuffer = new ComputeBuffer(
+            1,
+            globalIndirectArgs.Length * sizeof(uint),
+            ComputeBufferType.IndirectArguments
+        );
+
+        globalPropertyBlock = new MaterialPropertyBlock();
+    }
+    
+    private void UpdateGlobalIndirectArgs(uint instanceCount)
+    {
+        if (grassMesh == null || globalArgsBuffer == null)
+            return;
+
+        int safeSubmeshIndex = Mathf.Clamp(submeshIndex, 0, grassMesh.subMeshCount - 1);
+
+        globalIndirectArgs[0] = grassMesh.GetIndexCount(safeSubmeshIndex);
+        globalIndirectArgs[1] = instanceCount;
+        globalIndirectArgs[2] = grassMesh.GetIndexStart(safeSubmeshIndex);
+        globalIndirectArgs[3] = grassMesh.GetBaseVertex(safeSubmeshIndex);
+        globalIndirectArgs[4] = 0;
+
+        globalArgsBuffer.SetData(globalIndirectArgs);
+    }
+    
+    private bool RebuildGlobalGrassBufferIfNeeded()
+    {
+        if (!globalGrassBufferDirty &&
+            globalAllGrassBuffer != null &&
+            globalVisibleGrassBuffer != null &&
+            globalArgsBuffer != null)
+        {
+            return globalGrassInstances.Count > 0;
+        }
+
+        globalGrassBufferDirty = false;
+        globalGrassInstances.Clear();
+        globalReadyChunkCount = 0;
+
+        bool hasBounds = false;
+        Bounds combinedBounds = default;
+
+        foreach (GrassChunk chunk in chunks.Values)
+        {
+            if (!chunk.IsReadyForRendering)
+                continue;
+
+            if (chunk.instances.Count == 0)
+                continue;
+
+            globalGrassInstances.AddRange(chunk.instances);
+            globalReadyChunkCount++;
+
+            if (!hasBounds)
+            {
+                combinedBounds = chunk.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                combinedBounds.Encapsulate(chunk.bounds);
+            }
+        }
+
+        if (globalGrassInstances.Count == 0)
+        {
+            globalDrawBounds = new Bounds(
+                target != null ? target.position : transform.position,
+                Vector3.one
+            );
+
+            if (globalArgsBuffer != null)
+                UpdateGlobalIndirectArgs(0);
+
+            return false;
+        }
+
+        EnsureGlobalGrassBufferCapacity(globalGrassInstances.Count);
+
+        globalAllGrassBuffer.SetData(globalGrassInstances, 0, 0, globalGrassInstances.Count);
+
+        combinedBounds.Expand((cullingBoundsPadding + gpuCullBoundsRadius) * 2f);
+        globalDrawBounds = combinedBounds;
+
+        UpdateGlobalIndirectArgs((uint)globalGrassInstances.Count);
+        return true;
+    }
+    
+    private void DrawGlobalGpuCulledGrass(int layer)
+    {
+        if (!RebuildGlobalGrassBufferIfNeeded())
+            return;
+
+        if (globalGrassInstances.Count == 0)
+            return;
+
+        UpdateGpuCullShaderGlobals();
+
+        globalVisibleGrassBuffer.SetCounterValue(0);
+
+        gpuInstanceCullShader.SetInt(InstanceCountId, globalGrassInstances.Count);
+        gpuInstanceCullShader.SetBuffer(gpuCullKernel, AllGrassInstancesId, globalAllGrassBuffer);
+        gpuInstanceCullShader.SetBuffer(gpuCullKernel, VisibleGrassInstancesId, globalVisibleGrassBuffer);
+
+        int threadGroups = Mathf.CeilToInt(globalGrassInstances.Count / (float)GpuCullThreadGroupSize);
+        gpuInstanceCullShader.Dispatch(gpuCullKernel, threadGroups, 1, 1);
+
+        ComputeBuffer.CopyCount(globalVisibleGrassBuffer, globalArgsBuffer, sizeof(uint));
+
+        grassMaterial.SetBuffer(GrassInstancesId, globalVisibleGrassBuffer);
+        globalPropertyBlock.SetBuffer(GrassInstancesId, globalVisibleGrassBuffer);
+
+        Graphics.DrawMeshInstancedIndirect(
+            grassMesh,
+            submeshIndex,
+            grassMaterial,
+            globalDrawBounds,
+            globalArgsBuffer,
+            0,
+            globalPropertyBlock,
+            shadowCastingMode,
+            receiveShadows,
+            layer
+        );
+
+        visibleChunkCount = globalReadyChunkCount;
+        visibleInstanceCount = globalGrassInstances.Count;
+        submittedDrawCallCount = 1;
+        gpuCulledChunkCount = globalReadyChunkCount;
+    }
+    
     private void ReleaseAllIndirectBuffers()
     {
         foreach (GrassChunk chunk in chunks.Values)
             chunk.ReleaseIndirectBuffers();
+
+        ReleaseGlobalIndirectBuffers();
+    }
+    
+    private void ReleaseGlobalIndirectBuffers()
+    {
+        if (globalAllGrassBuffer != null)
+        {
+            globalAllGrassBuffer.Release();
+            globalAllGrassBuffer = null;
+        }
+
+        if (globalVisibleGrassBuffer != null)
+        {
+            globalVisibleGrassBuffer.Release();
+            globalVisibleGrassBuffer = null;
+        }
+
+        if (globalArgsBuffer != null)
+        {
+            globalArgsBuffer.Release();
+            globalArgsBuffer = null;
+        }
+
+        globalPropertyBlock = null;
+        globalGrassBufferCapacity = 0;
+        globalReadyChunkCount = 0;
+        globalGrassBufferDirty = true;
     }
 
     private void PrewarmChunkPoolIfNeeded()
@@ -1632,6 +1907,9 @@ public class InstancedGrassRenderer : MonoBehaviour
         GUILayout.Label($"Build Frame: {lastChunkBuildGeneratedInstances} grass / {lastChunkBuildAttempts} attempts / {lastChunkBuildCompletedChunks} chunks / {lastChunkBuildMs:F2} ms");
         GUILayout.Space(4f);
 
+        GUILayout.Label($"Global Buffer: {globalGrassInstances.Count} / {globalGrassBufferCapacity}");
+        GUILayout.Label($"Global Ready Chunks: {globalReadyChunkCount}");
+        
         GUILayout.Label($"Culling: {(enableFrustumCulling ? "On" : "Off")}  Padding: {cullingBoundsPadding:F1}");
         GUILayout.Label($"GPU Cull: {(IsGpuInstanceCullingActive() ? "On" : "Off")}  Chunks: {GpuCulledChunkCount}");
         GUILayout.Label($"GPU Cull Distance: {gpuCullMaxDistance:F1}  Radius: {gpuCullBoundsRadius:F2}");

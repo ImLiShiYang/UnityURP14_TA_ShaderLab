@@ -270,8 +270,6 @@ MonoBehaviour:
   leftHeightTex: {fileID: 0}
   rightNormalTex: {fileID: 0}
   rightHeightTex: {fileID: 0}
-  footSplashParticlePrefab: {fileID: 0}
-  footSplashParticleLife: 0.1
   normalStrength: 2
   heightStrength: 3
   invertHeight: 0
@@ -926,6 +924,8 @@ MonoBehaviour:
   waterRipple: {fileID: 0}
   enableWaterRippleBrushSpawner: 1
   waterRippleBrushSpawner: {fileID: 5328070987856561624}
+  enableGrassInteractionBrush: 1
+  grassInteractionBrushSpawner: {fileID: 0}
   enableWeaponWaterRipple: 1
   weaponWaterRipple: {fileID: 7652637918500950573}
   logEvent: 0
@@ -1629,6 +1629,8 @@ MonoBehaviour:
   waterRipple: {fileID: 0}
   enableWaterRippleBrushSpawner: 1
   waterRippleBrushSpawner: {fileID: 5328070987856561624}
+  enableGrassInteractionBrush: 1
+  grassInteractionBrushSpawner: {fileID: 0}
   enableWeaponWaterRipple: 1
   weaponWaterRipple: {fileID: 7652637918500950573}
   logEvent: 0

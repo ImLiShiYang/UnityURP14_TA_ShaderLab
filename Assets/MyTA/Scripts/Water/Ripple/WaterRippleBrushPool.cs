@@ -39,7 +39,7 @@ public class WaterRippleBrushPool : MonoBehaviour
 
     [Header("Debug")]
     [Tooltip("是否在 Game 视图左上角绘制对象池占用情况。")]
-    public bool showDebugGUI = true;
+    public bool showDebugGUI = false;
 
     [Tooltip("对象池调试 UI 的左上角位置。")]
     public Vector2 debugGUIPosition = new Vector2(10f, 230f);

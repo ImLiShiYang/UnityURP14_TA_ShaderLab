@@ -107,6 +107,8 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     [Tooltip("脚掌距离地面不超过该值时，才向草 Shader 提供有效压草中心。")]
     [Min(0f)]
     public float maxPressGroundDistance = 0.22f;
+    
+    
 
 
     // ============================================================
@@ -191,6 +193,9 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     public bool showBrushPlane = true;
     public bool showDebugLabels = false;
 
+    private static readonly int BrushStrengthID = Shader.PropertyToID("_Strength");
+    private static readonly int BrushSoftnessID = Shader.PropertyToID("_Softness");
+    
     [Range(0.005f, 0.1f)]
     public float debugPointSize = 0.015f;
 
@@ -422,10 +427,7 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         return false;
     }
 
-
-    // ============================================================
-    // Spawn Logic
-    // ============================================================
+    
 
     private bool SpawnGrassBrush(
     bool isLeftFoot,
@@ -634,6 +636,112 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         }
 
         return true;
+    }
+    
+    public bool SpawnGrassBrushAtSurface(
+        Vector3 surfacePosition,
+        Vector3 surfaceNormal,
+        Vector3 forward,
+        Vector2 brushSize,
+        GameObject brushPrefabOverride = null,
+        float? overrideBrushLife = null,
+        float strength = 1f,
+        float softness = 0.4f,
+        bool checkSurfaceMask = true)
+    {
+        GameObject sourceBrushPrefab = brushPrefabOverride != null ? brushPrefabOverride : brushPrefab;
+
+        if (sourceBrushPrefab == null)
+            return false;
+
+        Vector3 normal = surfaceNormal.sqrMagnitude > 0.0001f
+            ? surfaceNormal.normalized
+            : Vector3.up;
+
+        if (Vector3.Dot(normal, Vector3.up) < 0f)
+            normal = -normal;
+
+        if (checkSurfaceMask && useSurfaceMask && grassSurfaceMask != null)
+        {
+            if (!CanSurfaceSpawnAt(surfacePosition))
+                return false;
+        }
+
+        Vector3 forwardOnSurface = Vector3.ProjectOnPlane(forward, normal);
+
+        if (forwardOnSurface.sqrMagnitude < 0.0001f && characterRoot != null)
+            forwardOnSurface = Vector3.ProjectOnPlane(characterRoot.forward, normal);
+
+        if (forwardOnSurface.sqrMagnitude < 0.0001f)
+            forwardOnSurface = Vector3.ProjectOnPlane(Vector3.forward, normal);
+
+        forwardOnSurface.Normalize();
+
+        Vector3 spawnPosition = surfacePosition + normal * surfaceOffset;
+
+        Quaternion spawnRotation = Quaternion.LookRotation(-normal, forwardOnSurface);
+        spawnRotation = Quaternion.AngleAxis(grassBrushYawOffset, normal) * spawnRotation;
+
+        Vector3 brushScale = overrideBrushScale
+            ? new Vector3(Mathf.Max(0.001f, brushSize.x), Mathf.Max(0.001f, brushSize.y), 1f)
+            : sourceBrushPrefab.transform.localScale;
+
+        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
+
+        GameObject brush = Instantiate(sourceBrushPrefab, spawnPosition, spawnRotation);
+        brush.transform.localScale = brushScale;
+
+        int brushLayer = LayerMask.NameToLayer(brushLayerName);
+
+        if (brushLayer >= 0)
+        {
+            SetLayerRecursively(brush, brushLayer);
+        }
+        else
+        {
+            Debug.LogWarning($"[GrassInteractionBrushSpawner] 找不到 Layer: {brushLayerName}", this);
+        }
+
+        SetupBrushMaterial(brush, strength, softness);
+        DisableBrushShadows(brush);
+
+        Destroy(brush, Mathf.Max(0.001f, life));
+
+        if (logSpawn)
+        {
+            Debug.Log(
+                $"[GrassInteractionBrushSpawner] Spawn external Grass Brush. " +
+                $"position={spawnPosition}, normal={normal}, forward={forwardOnSurface}, size={brushSize}, strength={strength}",
+                this
+            );
+        }
+
+        return true;
+    }
+    
+    private void SetupBrushMaterial(GameObject brush, float strength, float softness)
+    {
+        if (brush == null)
+            return;
+
+        float safeStrength = Mathf.Clamp01(strength);
+        float safeSoftness = Mathf.Clamp(softness, 0.01f, 1f);
+
+        Renderer[] renderers = brush.GetComponentsInChildren<Renderer>();
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer r = renderers[i];
+
+            if (r == null)
+                continue;
+
+            MaterialPropertyBlock block = new MaterialPropertyBlock();
+            r.GetPropertyBlock(block);
+            block.SetFloat(BrushStrengthID, safeStrength);
+            block.SetFloat(BrushSoftnessID, safeSoftness);
+            r.SetPropertyBlock(block);
+        }
     }
 
 
