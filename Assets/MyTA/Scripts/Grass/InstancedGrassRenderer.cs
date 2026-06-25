@@ -274,12 +274,18 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     [Tooltip("水面所在 Layer。水面需要有 Collider，通常是 Water Layer。")]
     public LayerMask waterMask;
+    
+    [Header("Wetland Exclusion")]
+    [Tooltip("湿地所在 Layer。Raycast 如果先打到湿地，就不生成草。")]
+    public LayerMask wetlandMask;
 
     [Tooltip("从地面点上方多高开始检测水面。")]
     public float waterCheckHeight = 5f;
 
     [Tooltip("水面比地面高多少才认为这里在水下。")]
     public float waterSurfacePadding = 0.02f;
+    
+    
 
     [Header("Transform")]
     [Tooltip("当前草模型本地 Z 是高度轴，所以默认需要 -90 度 X 旋转把草立起来。")]
@@ -590,9 +596,9 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         Vector3 center = target.position;
 
-        // 为了避免有些随机点 Raycast 不到地面，或者坡度不符合要求，
-        // 尝试次数会比目标草数量更多一些。
-        int maxAttempts = Mathf.Max(instanceCount * 8, instanceCount);
+        // instanceCount 作为采样次数，不再为了凑满数量而额外重试。
+        // Water / Wetland / 非地面采样失败后直接少生成一棵，避免剩余区域被挤密。
+        int maxAttempts = instanceCount;
 
         Quaternion baseRotation = Quaternion.Euler(baseRotationEuler);
 
@@ -1009,14 +1015,18 @@ public class InstancedGrassRenderer : MonoBehaviour
         job.minX = coord.x * safeChunkSize;
         job.minZ = coord.y * safeChunkSize;
         job.rayY = target != null ? target.position.y + raycastHeight : raycastHeight;
+        
         job.targetInstanceCount = targetInstanceCount;
-        job.maxAttempts = Mathf.Max(targetInstanceCount * 8, targetInstanceCount);
+
+        // 关键：不要为了凑满 targetInstanceCount 而重试 8 倍。
+        // targetInstanceCount 现在代表“这个 chunk 的采样次数上限”。
+        // 如果采样点打到 Water / Wetland，就直接失败，不补到其他区域。
+        job.maxAttempts = targetInstanceCount;
     }
 
     private void ContinueChunkBuildJob(ChunkBuildJob job, ref int generatedBudget, ref int attemptBudget)
     {
         while (job.attemptCount < job.maxAttempts &&
-               job.generatedCount < job.targetInstanceCount &&
                generatedBudget > 0 &&
                attemptBudget > 0)
         {
@@ -1105,7 +1115,7 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         chunk.SetCapacity(targetInstanceCount, renderMode);
 
-        int maxAttempts = Mathf.Max(targetInstanceCount * 8, targetInstanceCount);
+        int maxAttempts = targetInstanceCount;
         int generatedInChunk = 0;
 
         chunk.densityLodLevel = lodLevel;
@@ -1192,13 +1202,15 @@ public class InstancedGrassRenderer : MonoBehaviour
         matrix = Matrix4x4.identity;
         rootPosition = Vector3.zero;
 
-        int placementMask = rejectGrassUnderWater
-            ? groundMask.value | waterMask.value
-            : groundMask.value;
+        int placementMask = groundMask.value | wetlandMask.value;
 
-        QueryTriggerInteraction triggerInteraction = rejectGrassUnderWater
-            ? QueryTriggerInteraction.Collide
-            : QueryTriggerInteraction.Ignore;
+        if (rejectGrassUnderWater)
+            placementMask |= waterMask.value;
+
+        QueryTriggerInteraction triggerInteraction =
+            (rejectGrassUnderWater || wetlandMask.value != 0)
+                ? QueryTriggerInteraction.Collide
+                : QueryTriggerInteraction.Ignore;
 
         if (!Physics.Raycast(
                 rayOrigin,
@@ -1213,6 +1225,10 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         // 如果从上往下第一个打到的是水，说明水盖在地面上方，这里不长草
         if (rejectGrassUnderWater && IsLayerInMask(hit.collider.gameObject.layer, waterMask))
+            return false;
+        
+        // 如果从上往下第一个打到的是湿地，说明这里是池塘边湿地区域，不长草
+        if (IsLayerInMask(hit.collider.gameObject.layer, wetlandMask))
             return false;
 
         // 安全判断：不是地面层，也不生成草
