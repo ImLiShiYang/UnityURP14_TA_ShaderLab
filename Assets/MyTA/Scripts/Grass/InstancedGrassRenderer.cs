@@ -25,6 +25,31 @@ public class InstancedGrassRenderer : MonoBehaviour
         DrawMeshInstancedIndirect
     }
 
+    public enum GrassPlacementAction
+    {
+        GrowGrass,
+        RejectGrass
+    }
+
+    [System.Serializable]
+    public class GrassPlacementLayerRule
+    {
+        [Tooltip("规则名字，只用于 Inspector 里识别。")]
+        public string name = "New Rule";
+
+        [Tooltip("这条规则影响的 Layer。可以一次选择多个 Layer。")]
+        public LayerMask layerMask;
+
+        [Tooltip("射线第一个打到这些 Layer 时如何处理。GrowGrass 表示允许长草，RejectGrass 表示阻挡长草。")]
+        public GrassPlacementAction action = GrassPlacementAction.GrowGrass;
+
+        [Tooltip("作为 GrowGrass 使用时，是否检查最大坡度。比如地面要检查，特殊平面可以按需关闭。")]
+        public bool checkSlope = true;
+
+        [Tooltip("作为 GrowGrass 使用时，是否额外检测这个点上方是否被水面覆盖。")]
+        public bool checkUnderWater = true;
+    }
+
     private enum DensityLodLevel
     {
         Near = 0,
@@ -286,6 +311,18 @@ public class InstancedGrassRenderer : MonoBehaviour
     public float waterSurfacePadding = 0.02f;
     
     
+
+    [Header("Placement Layer Rules")]
+    [Tooltip("开启后，优先使用下面的规则列表决定哪些 Layer 能长草、哪些 Layer 阻挡长草。规则列表为空时会回退到上面的旧 Mask。")]
+    public bool usePlacementLayerRules = true;
+
+    [Tooltip("从上往下 Raycast 时，第一个命中的 Layer 会按这里的规则处理。列表顺序有优先级，越靠前越先判断。")]
+    public List<GrassPlacementLayerRule> placementLayerRules = new List<GrassPlacementLayerRule>();
+
+    [Tooltip("规则列表为空时，是否继续使用 groundMask / wetlandMask / waterMask 的旧逻辑。建议保持开启，避免旧场景丢配置。")]
+    public bool useLegacyLayerMasksWhenRulesEmpty = true;
+
+
 
     [Header("Transform")]
     [Tooltip("当前草模型本地 Z 是高度轴，所以默认需要 -90 度 X 旋转把草立起来。")]
@@ -1169,6 +1206,159 @@ public class InstancedGrassRenderer : MonoBehaviour
         return generatedInChunk;
     }
 
+    [ContextMenu("Setup Default Grass Placement Rules")]
+    private void SetupDefaultGrassPlacementRules()
+    {
+        placementLayerRules.Clear();
+
+        if (waterMask.value != 0)
+        {
+            placementLayerRules.Add(new GrassPlacementLayerRule
+            {
+                name = "Water - Reject Grass",
+                layerMask = waterMask,
+                action = GrassPlacementAction.RejectGrass,
+                checkSlope = false,
+                checkUnderWater = false
+            });
+        }
+
+        if (wetlandMask.value != 0)
+        {
+            placementLayerRules.Add(new GrassPlacementLayerRule
+            {
+                name = "Wetland - Reject Grass",
+                layerMask = wetlandMask,
+                action = GrassPlacementAction.RejectGrass,
+                checkSlope = false,
+                checkUnderWater = false
+            });
+        }
+
+        if (groundMask.value != 0)
+        {
+            placementLayerRules.Add(new GrassPlacementLayerRule
+            {
+                name = "Ground - Grow Grass",
+                layerMask = groundMask,
+                action = GrassPlacementAction.GrowGrass,
+                checkSlope = true,
+                checkUnderWater = true
+            });
+        }
+    }
+
+    private bool HasActivePlacementLayerRules()
+    {
+        if (!usePlacementLayerRules || placementLayerRules == null)
+            return false;
+
+        for (int i = 0; i < placementLayerRules.Count; i++)
+        {
+            GrassPlacementLayerRule rule = placementLayerRules[i];
+
+            if (rule != null && rule.layerMask.value != 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    private int BuildPlacementRaycastMaskValue(bool useRules)
+    {
+        if (useRules)
+        {
+            int ruleMask = 0;
+
+            for (int i = 0; i < placementLayerRules.Count; i++)
+            {
+                GrassPlacementLayerRule rule = placementLayerRules[i];
+
+                if (rule == null)
+                    continue;
+
+                ruleMask |= rule.layerMask.value;
+            }
+
+            return ruleMask;
+        }
+
+        if (!useLegacyLayerMasksWhenRulesEmpty)
+            return 0;
+
+        int placementMask = groundMask.value | wetlandMask.value;
+
+        if (rejectGrassUnderWater)
+            placementMask |= waterMask.value;
+
+        return placementMask;
+    }
+
+    private bool TryGetPlacementLayerRule(int layer, out GrassPlacementLayerRule result)
+    {
+        result = null;
+
+        if (placementLayerRules == null)
+            return false;
+
+        for (int i = 0; i < placementLayerRules.Count; i++)
+        {
+            GrassPlacementLayerRule rule = placementLayerRules[i];
+
+            if (rule == null || rule.layerMask.value == 0)
+                continue;
+
+            if (!IsLayerInMask(layer, rule.layerMask))
+                continue;
+
+            result = rule;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryAcceptRuleBasedPlacementHit(RaycastHit hit)
+    {
+        if (!TryGetPlacementLayerRule(hit.collider.gameObject.layer, out GrassPlacementLayerRule rule))
+            return false;
+
+        if (rule.action == GrassPlacementAction.RejectGrass)
+            return false;
+
+        if (rule.checkSlope)
+        {
+            float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
+
+            if (slopeAngle > maxSlopeAngle)
+                return false;
+        }
+
+        if (rejectGrassUnderWater && rule.checkUnderWater && IsPointUnderWater(hit.point))
+            return false;
+
+        return true;
+    }
+
+    private bool TryAcceptLegacyPlacementHit(RaycastHit hit)
+    {
+        // 如果从上往下第一个打到的是水，说明水盖在地面上方，这里不长草。
+        if (rejectGrassUnderWater && IsLayerInMask(hit.collider.gameObject.layer, waterMask))
+            return false;
+
+        // 如果从上往下第一个打到的是湿地，说明这里是池塘边湿地区域，不长草。
+        if (IsLayerInMask(hit.collider.gameObject.layer, wetlandMask))
+            return false;
+
+        // 安全判断：不是地面层，也不生成草。
+        if (!IsLayerInMask(hit.collider.gameObject.layer, groundMask))
+            return false;
+
+        float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
+
+        return slopeAngle <= maxSlopeAngle;
+    }
+
     private bool IsPointUnderWater(Vector3 groundPoint)
     {
         Vector3 origin = groundPoint + Vector3.up * Mathf.Max(0.001f, waterCheckHeight);
@@ -1187,7 +1377,7 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         return waterHit.point.y > groundPoint.y + waterSurfacePadding;
     }
-    
+
     private bool TryCreateGrassInstance(
         Vector3 rayOrigin,
         System.Random random,
@@ -1202,13 +1392,15 @@ public class InstancedGrassRenderer : MonoBehaviour
         matrix = Matrix4x4.identity;
         rootPosition = Vector3.zero;
 
-        int placementMask = groundMask.value | wetlandMask.value;
+        bool useRules = HasActivePlacementLayerRules();
+        int placementMask = BuildPlacementRaycastMaskValue(useRules);
 
-        if (rejectGrassUnderWater)
-            placementMask |= waterMask.value;
+        if (placementMask == 0)
+            return false;
 
-        QueryTriggerInteraction triggerInteraction =
-            (rejectGrassUnderWater || wetlandMask.value != 0)
+        QueryTriggerInteraction triggerInteraction = useRules
+            ? QueryTriggerInteraction.Collide
+            : (rejectGrassUnderWater || wetlandMask.value != 0)
                 ? QueryTriggerInteraction.Collide
                 : QueryTriggerInteraction.Ignore;
 
@@ -1223,23 +1415,11 @@ public class InstancedGrassRenderer : MonoBehaviour
             return false;
         }
 
-        // 如果从上往下第一个打到的是水，说明水盖在地面上方，这里不长草
-        if (rejectGrassUnderWater && IsLayerInMask(hit.collider.gameObject.layer, waterMask))
-            return false;
-        
-        // 如果从上往下第一个打到的是湿地，说明这里是池塘边湿地区域，不长草
-        if (IsLayerInMask(hit.collider.gameObject.layer, wetlandMask))
-            return false;
+        bool canCreateGrass = useRules
+            ? TryAcceptRuleBasedPlacementHit(hit)
+            : TryAcceptLegacyPlacementHit(hit);
 
-        // 安全判断：不是地面层，也不生成草
-        if (!IsLayerInMask(hit.collider.gameObject.layer, groundMask))
-            return false;
-        
-        // 过滤太陡的坡面。
-        // 比如石壁、垂直墙面不应该长草。
-        float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
-
-        if (slopeAngle > maxSlopeAngle)
+        if (!canCreateGrass)
             return false;
 
         // 每棵草随机绕 Y 轴旋转，避免所有草朝向一致。
