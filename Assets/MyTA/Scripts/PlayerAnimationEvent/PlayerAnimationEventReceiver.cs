@@ -275,9 +275,10 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
 
         if (enableWeaponWaterRipple && weaponWaterRipple != null)
             weaponWaterRipple.EndWeaponWaterRipple();
-
+        
         if (enableWeaponGrassCut && weaponGrassCut != null)
             weaponGrassCut.EndWeaponGrassCut();
+        
     }
 
     /// <summary>
@@ -307,13 +308,16 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
     /// 如果以后你想让某些动画只触发草地 Brush，
     /// 可以直接在 Animation Event 里调用这个函数。
     /// </summary>
-    public void SpawnLeftGrassBrush()
+    public void SpawnLeftBrush()
     {
         if (logEvent)
             Debug.Log("[PlayerAnimationEventReceiver] SpawnLeftGrassBrush", this);
 
         if (enableGrassInteractionBrush && grassInteractionBrushSpawner != null)
             grassInteractionBrushSpawner.SpawnLeftGrassBrush();
+        
+        if(enableDecalFootprint && decalSpawner != null)
+            decalSpawner.SpawnLeftFootprint();
     }
 
     /// <summary>
@@ -322,12 +326,15 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
     /// 如果以后你想让某些动画只触发草地 Brush，
     /// 可以直接在 Animation Event 里调用这个函数。
     /// </summary>
-    public void SpawnRightGrassBrush()
+    public void SpawnRightBrush()
     {
         if (logEvent)
             Debug.Log("[PlayerAnimationEventReceiver] SpawnRightGrassBrush", this);
 
         if (enableGrassInteractionBrush && grassInteractionBrushSpawner != null)
             grassInteractionBrushSpawner.SpawnRightGrassBrush();
+        
+        if(enableDecalFootprint && decalSpawner != null)
+            decalSpawner.SpawnRightFootprint();
     }
 }
