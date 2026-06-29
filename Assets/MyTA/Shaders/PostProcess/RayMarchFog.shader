@@ -28,9 +28,13 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
         _FogBaseHeight ("Fog Base Height", Float) = 0
         _HeightFalloff ("Height Falloff", Range(0, 2)) = 0.25
 
-        [Header(Lighting)]
-        _LightScatter ("Light Scatter", Range(0, 3)) = 0.5
-        _LightPower ("Light Power", Range(1, 16)) = 4
+        [Header(Light)]
+        _LightScatter ("LightScatter", Range(0, 3)) = 1.0
+        _LightPower ("LightPower", Range(1, 16)) = 6
+        _VolumeLightIntensity ("VolumeLightIntensity", Range(0, 5)) = 1.5
+        _AmbientFog ("AmbientFog", Range(0, 1)) = 0.35
+        _ShadowStrength ("ShadowStrength", Range(0, 1)) = 1.0
+        _SideScatter ("侧向散射保底", Range(0, 1)) = 0.25
     }
 
     SubShader
@@ -53,11 +57,16 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
 
             #pragma vertex Vert
             #pragma fragment Frag
+            
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+            
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _FogColor;
@@ -84,6 +93,10 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
 
                 float _LightScatter;
                 float _LightPower;
+                float _VolumeLightIntensity;
+                float _AmbientFog;
+                float _ShadowStrength;
+                float _SideScatter;
             CBUFFER_END
 
 
@@ -164,6 +177,16 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
                 return ComputeWorldSpacePosition(uv, depth, UNITY_MATRIX_I_VP);
             }
 
+            Light GetMainLightWithShadow(float3 positionWS)
+            {
+            #if defined(_MAIN_LIGHT_SHADOWS) || defined(_MAIN_LIGHT_SHADOWS_CASCADE)
+                float4 shadowCoord = TransformWorldToShadowCoord(positionWS);
+                return GetMainLight(shadowCoord);
+            #else
+                return GetMainLight();
+            #endif
+            }
+            
             float GetFogDensity(float3 worldPos)
             {
                 float density = max(0.0, _FogDensity);
@@ -218,7 +241,7 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
                 float transmittance = 1.0;
                 float3 fogColorAccum = 0.0;
 
-                Light mainLight = GetMainLight();
+                // Light mainLight = GetMainLight();
 
                 for (int i = 0; i < 64; i++)
                 {
@@ -233,11 +256,26 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
                     float stepDensity = density * stepSize;
                     float stepAlpha = 1.0 - exp(-stepDensity);
 
+                    Light mainLight = GetMainLightWithShadow(samplePosWS);
+
                     float lightFacing = dot(rayDir, mainLight.direction) * 0.5 + 0.5;
                     float forwardScatter = pow(saturate(lightFacing), max(1.0, _LightPower));
+                    
+                    // 让非正对太阳的角度也能看到一点体积光
+                    float scatterAmount = _SideScatter + forwardScatter * _LightScatter;
 
-                    float3 fogLighting = _FogColor.rgb * _FogIntensity;
-                    fogLighting += mainLight.color * forwardScatter * _LightScatter;
+                    float shadowAttenuation = lerp(1.0, mainLight.shadowAttenuation, saturate(_ShadowStrength));
+
+                    float3 ambientFog = _FogColor.rgb * _FogIntensity * _AmbientFog;
+
+                    float3 directFog = _FogColor.rgb
+                                     * mainLight.color
+                                     * _FogIntensity
+                                     * scatterAmount
+                                     * _VolumeLightIntensity
+                                     * shadowAttenuation;
+
+                    float3 fogLighting = ambientFog + directFog;
 
                     fogColorAccum += transmittance * stepAlpha * fogLighting;
 
@@ -263,6 +301,16 @@ Shader "MyTA/Volumetric/SimpleRayMarchFog"
                 half4 sceneColor = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
 
                 float rawDepth = SampleSceneDepth(uv);
+                
+                // 如果当前像素没有有效场景深度，比如天空或远平面，就不要强行 ray march。否则很容易整片发白。
+                #if UNITY_REVERSED_Z
+                    if (rawDepth <= 0.0001)
+                        return sceneColor;
+                #else
+                    if (rawDepth >= 0.9999)
+                        return sceneColor;
+                #endif
+                
                 float3 worldPos = GetWorldPositionFromDepth(uv, rawDepth);
 
                 float3 cameraPosWS = GetCameraPositionWS();

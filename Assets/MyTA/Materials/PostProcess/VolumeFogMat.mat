@@ -96,6 +96,7 @@ Material:
     m_Floats:
     - _AlphaClip: 0
     - _AlphaToMask: 0
+    - _AmbientFog: 0.367
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
     - _BumpScale: 1
@@ -108,28 +109,30 @@ Material:
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1
-    - _Extinction: 1.03
+    - _Extinction: 1.12
     - _FogBaseHeight: 0
-    - _FogDensity: 0.1907
-    - _FogIntensity: 1
+    - _FogDensity: 0.0695
+    - _FogIntensity: 1.76
     - _FogStartDistance: 5.88
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
-    - _HeightFalloff: 0.11
-    - _LightPower: 4.29
-    - _LightScatter: 0.48
+    - _HeightFalloff: 0.195
+    - _LightPower: 9.39
+    - _LightScatter: 1.88
     - _LocalFogSoftness: 1
     - _MaxDistance: 60
     - _Metallic: 0
     - _NoiseScale: 1.07
-    - _NoiseSpeed: 3.34
+    - _NoiseSpeed: 1
     - _NoiseStrength: 1
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _SampleCount: 29.7
+    - _ShadowStrength: 1
+    - _SideScatter: 0.034
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -138,6 +141,7 @@ Material:
     - _Surface: 0
     - _UseHeightFog: 1
     - _UseLocalFog: 1
+    - _VolumeLightIntensity: 1.31
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
@@ -145,7 +149,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FogColor: {r: 0.65, g: 0.75, b: 0.85, a: 1}
-    - _LocalFogCenter: {r: 206.16, g: 9.75, b: 170, a: 0}
+    - _LocalFogCenter: {r: 206.16, g: 8.63, b: 170, a: 0}
     - _LocalFogSize: {r: 73.323906, g: 15.197052, b: 99.01016, a: 0}
     - _NoiseDirection: {r: 1, g: 0, b: 0.5, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
