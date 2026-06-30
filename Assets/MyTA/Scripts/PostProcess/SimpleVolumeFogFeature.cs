@@ -28,11 +28,11 @@ public class SimpleVolumeFogFeature : ScriptableRendererFeature
 
     public Settings settings = new Settings();
 
-    private SimpleVolumeFogPass fogPass;
+    private SimpleVolumeCloudPass  cloudPass;
 
     public override void Create()
     {
-        fogPass = new SimpleVolumeFogPass(settings)
+        cloudPass = new SimpleVolumeCloudPass(settings)
         {
             renderPassEvent = settings.renderPassEvent
         };
@@ -43,7 +43,7 @@ public class SimpleVolumeFogFeature : ScriptableRendererFeature
         if (!ShouldRender(renderingData))
             return;
 
-        fogPass.SetTarget(renderer.cameraColorTargetHandle);
+        cloudPass.SetTarget(renderer.cameraColorTargetHandle);
     }
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
@@ -51,12 +51,12 @@ public class SimpleVolumeFogFeature : ScriptableRendererFeature
         if (!ShouldRender(renderingData))
             return;
 
-        renderer.EnqueuePass(fogPass);
+        renderer.EnqueuePass(cloudPass);
     }
 
     protected override void Dispose(bool disposing)
     {
-        fogPass?.Dispose();
+        cloudPass?.Dispose();
     }
 
     private bool ShouldRender(in RenderingData renderingData)
@@ -75,7 +75,7 @@ public class SimpleVolumeFogFeature : ScriptableRendererFeature
         return true;
     }
 
-    private class SimpleVolumeFogPass : ScriptableRenderPass
+    private class SimpleVolumeCloudPass  : ScriptableRenderPass
     {
         private static readonly int DownsampledFogDepthTextureId = Shader.PropertyToID("_DownsampledFogDepthTexture");
         private static readonly int VolumeFogTextureId = Shader.PropertyToID("_VolumeFogTexture");
@@ -106,7 +106,7 @@ public class SimpleVolumeFogFeature : ScriptableRendererFeature
         private int verticalBlurPass = -1;
         private int compositePass = -1;
 
-        public SimpleVolumeFogPass(Settings settings)
+        public SimpleVolumeCloudPass(Settings settings)
         {
             this.settings = settings;
             ConfigureInput(ScriptableRenderPassInput.Depth);
