@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -24,6 +25,15 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     [Header("References")]
     [Tooltip("草地交互 Brush prefab。通常是一个 Quad，材质使用 Hidden/Grass/InteractionBrush。")]
     public GameObject brushPrefab;
+
+    [Tooltip("Grass brush pool. Avoids frequent Instantiate / Destroy for footsteps and weapon attacks.")]
+    public GrassInteractionBrushPool brushPool;
+
+    [Tooltip("Prefer spawning brushes through the pool.")]
+    public bool usePooling = true;
+
+    [Tooltip("Create a runtime pool automatically when no matching pool is found.")]
+    public bool autoCreatePool = true;
 
     [Tooltip("角色根节点。一般是 Player 根物体，用于获取整体朝向。")]
     public Transform characterRoot;
@@ -212,6 +222,7 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
 
     private float lastLeftFootTime = -999f;
     private float lastRightFootTime = -999f;
+    private readonly Dictionary<GameObject, GrassInteractionBrushPool> brushPoolsByPrefab = new Dictionary<GameObject, GrassInteractionBrushPool>();
 
     private enum DebugFootSide
     {
@@ -264,6 +275,8 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
 
         if (playerController == null)
             playerController = GetComponentInParent<ThirdPersonPlayerController>();
+
+        SetupBrushPooling();
 
         if (animator != null)
         {
@@ -396,7 +409,7 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         if (Time.timeSinceLevelLoad < startBlockTime)
             return false;
 
-        if (brushPrefab == null || characterRoot == null)
+        if (!HasDefaultBrushPrefab() || characterRoot == null)
             return false;
 
         if (requireMoveInput && playerController != null && !playerController.HasMoveInput)
@@ -435,7 +448,9 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
     Transform toeTransform)
     {
         // 没有刷子预制体就无法生成压草 Brush
-        if (brushPrefab == null)
+        GameObject sourceBrushPrefab = GetDefaultBrushPrefab();
+
+        if (sourceBrushPrefab == null)
             return false;
 
         DebugFootSide debugFootSide = isLeftFoot ? DebugFootSide.Left : DebugFootSide.Right;
@@ -599,32 +614,20 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         // overrideBrushScale 为 true 时使用代码计算的大小，否则使用预制体原本的缩放。
         Vector3 brushScale = overrideBrushScale
             ? new Vector3(currentBrushSize.x, currentBrushSize.y, 1f)
-            : brushPrefab.transform.localScale;
+            : sourceBrushPrefab.transform.localScale;
 
         // 实例化 Brush。
         // 这个 Brush 本身不负责压弯草，而是会被交互 RT 相机 / RenderFeature 渲染到 RT 中。
-        GameObject brush = Instantiate(brushPrefab, spawnPosition, spawnRotation);
-        brush.transform.localScale = brushScale;
-
-        // 设置 Brush 所在 Layer。
-        // 通常交互 RT 相机会只渲染这个 Layer，从而把 Brush 写入 GrassInteractionTex。
-        int brushLayer = LayerMask.NameToLayer(brushLayerName);
-
-        if (brushLayer >= 0)
-        {
-            SetLayerRecursively(brush, brushLayer);
-        }
-        else
-        {
-            Debug.LogWarning($"[GrassInteractionBrushSpawner] 找不到 Layer: {brushLayerName}", this);
-        }
-
-        // Brush 只是写 RT 用的辅助物体，不应该参与正常场景阴影。
-        DisableBrushShadows(brush);
-
-        // Brush 只需要短时间存在。
-        // 如果 RT 是累积式的，Brush 被销毁后压痕仍然会保留在 RT 中。
-        Destroy(brush, Mathf.Max(0.001f, brushLife));
+        SpawnBrushObject(
+            sourceBrushPrefab,
+            spawnPosition,
+            spawnRotation,
+            brushScale,
+            brushLife,
+            false,
+            1f,
+            0.4f
+        );
 
         if (logSpawn)
         {
@@ -649,7 +652,7 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         float softness = 0.4f,
         bool checkSurfaceMask = true)
     {
-        GameObject sourceBrushPrefab = brushPrefabOverride != null ? brushPrefabOverride : brushPrefab;
+        GameObject sourceBrushPrefab = brushPrefabOverride != null ? brushPrefabOverride : GetDefaultBrushPrefab();
 
         if (sourceBrushPrefab == null)
             return false;
@@ -687,25 +690,16 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
             : sourceBrushPrefab.transform.localScale;
 
         float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
-
-        GameObject brush = Instantiate(sourceBrushPrefab, spawnPosition, spawnRotation);
-        brush.transform.localScale = brushScale;
-
-        int brushLayer = LayerMask.NameToLayer(brushLayerName);
-
-        if (brushLayer >= 0)
-        {
-            SetLayerRecursively(brush, brushLayer);
-        }
-        else
-        {
-            Debug.LogWarning($"[GrassInteractionBrushSpawner] 找不到 Layer: {brushLayerName}", this);
-        }
-
-        SetupBrushMaterial(brush, strength, softness);
-        DisableBrushShadows(brush);
-
-        Destroy(brush, Mathf.Max(0.001f, life));
+        SpawnBrushObject(
+            sourceBrushPrefab,
+            spawnPosition,
+            spawnRotation,
+            brushScale,
+            life,
+            true,
+            strength,
+            softness
+        );
 
         if (logSpawn)
         {
@@ -719,6 +713,201 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
         return true;
     }
     
+    private void SetupBrushPooling()
+    {
+        if (!usePooling)
+            return;
+
+        if (brushPool == null)
+            brushPool = GetComponentInChildren<GrassInteractionBrushPool>();
+
+        if (brushPool == null)
+            brushPool = GetComponentInParent<GrassInteractionBrushPool>();
+
+        if (brushPool == null)
+        {
+#if UNITY_2023_1_OR_NEWER
+            brushPool = FindFirstObjectByType<GrassInteractionBrushPool>();
+#else
+            brushPool = FindObjectOfType<GrassInteractionBrushPool>();
+#endif
+        }
+
+        if (brushPool == null && autoCreatePool && brushPrefab != null)
+        {
+            GameObject poolObject = new GameObject("GrassInteractionBrushPool");
+            poolObject.transform.SetParent(transform, false);
+
+            brushPool = poolObject.AddComponent<GrassInteractionBrushPool>();
+            brushPool.brushPrefab = brushPrefab;
+            brushPool.brushLayerName = brushLayerName;
+
+            if (brushPool.prewarmOnAwake)
+                brushPool.Prewarm();
+        }
+
+        if (brushPool != null && brushPool.brushPrefab == null && brushPrefab != null)
+        {
+            brushPool.brushPrefab = brushPrefab;
+
+            if (brushPool.prewarmOnAwake && brushPool.CreatedCount == 0)
+                brushPool.Prewarm();
+        }
+
+        if (brushPool != null && brushPool.HasPrefab)
+            RegisterBrushPool(brushPool.brushPrefab, brushPool);
+    }
+
+    private bool HasDefaultBrushPrefab()
+    {
+        return brushPrefab != null || (usePooling && brushPool != null && brushPool.HasPrefab);
+    }
+
+    private GameObject GetDefaultBrushPrefab()
+    {
+        if (brushPrefab != null)
+            return brushPrefab;
+
+        if (usePooling && brushPool != null && brushPool.HasPrefab)
+            return brushPool.brushPrefab;
+
+        return null;
+    }
+
+    private void RegisterBrushPool(GameObject sourceBrushPrefab, GrassInteractionBrushPool pool)
+    {
+        if (sourceBrushPrefab == null || pool == null)
+            return;
+
+        brushPoolsByPrefab[sourceBrushPrefab] = pool;
+    }
+
+    private GrassInteractionBrushPool GetPoolForPrefab(GameObject sourceBrushPrefab)
+    {
+        if (!usePooling || sourceBrushPrefab == null)
+            return null;
+
+        if (brushPoolsByPrefab.TryGetValue(sourceBrushPrefab, out GrassInteractionBrushPool cachedPool) && cachedPool != null)
+            return cachedPool;
+
+        if (brushPool != null)
+        {
+            if (brushPool.brushPrefab == null)
+            {
+                brushPool.brushPrefab = sourceBrushPrefab;
+
+                if (brushPool.prewarmOnAwake && brushPool.CreatedCount == 0)
+                    brushPool.Prewarm();
+            }
+
+            if (brushPool.brushPrefab == sourceBrushPrefab)
+            {
+                RegisterBrushPool(sourceBrushPrefab, brushPool);
+                return brushPool;
+            }
+        }
+
+        if (!autoCreatePool)
+            return null;
+
+        GrassInteractionBrushPool extraPool = CreatePoolForPrefab(sourceBrushPrefab);
+        RegisterBrushPool(sourceBrushPrefab, extraPool);
+
+        return extraPool;
+    }
+
+    private GrassInteractionBrushPool CreatePoolForPrefab(GameObject sourceBrushPrefab)
+    {
+        GameObject poolObject = new GameObject($"GrassInteractionBrushPool_{sourceBrushPrefab.name}");
+        poolObject.transform.SetParent(transform, false);
+
+        GrassInteractionBrushPool extraPool = poolObject.AddComponent<GrassInteractionBrushPool>();
+        GrassInteractionBrushPool templatePool = brushPool;
+
+        extraPool.brushPrefab = sourceBrushPrefab;
+        extraPool.brushLayerName = brushLayerName;
+
+        if (templatePool != null)
+        {
+            extraPool.maxBrushes = templatePool.maxBrushes;
+            extraPool.prewarmOnAwake = templatePool.prewarmOnAwake;
+            extraPool.recycleOldestWhenFull = templatePool.recycleOldestWhenFull;
+            extraPool.disableRendererShadows = templatePool.disableRendererShadows;
+            extraPool.disableColliders = templatePool.disableColliders;
+        }
+
+        if (extraPool.prewarmOnAwake)
+            extraPool.Prewarm();
+
+        return extraPool;
+    }
+
+    private GameObject SpawnBrushObject(
+        GameObject sourceBrushPrefab,
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 scale,
+        float life,
+        bool overrideMaterialProperties,
+        float strength,
+        float softness)
+    {
+        if (sourceBrushPrefab == null)
+            return null;
+
+        float safeLife = Mathf.Max(0.001f, life);
+        GrassInteractionBrushPool pool = GetPoolForPrefab(sourceBrushPrefab);
+
+        if (pool != null)
+        {
+            return pool.SpawnBrush(
+                position,
+                rotation,
+                scale,
+                safeLife,
+                overrideMaterialProperties,
+                strength,
+                softness
+            );
+        }
+
+        GameObject brush = Instantiate(sourceBrushPrefab, position, rotation);
+        brush.transform.localScale = scale;
+
+        int brushLayer = LayerMask.NameToLayer(brushLayerName);
+
+        if (brushLayer >= 0)
+            SetLayerRecursively(brush, brushLayer);
+        else
+            Debug.LogWarning($"[GrassInteractionBrushSpawner] Layer not found: {brushLayerName}", this);
+
+        if (overrideMaterialProperties)
+            SetupBrushMaterial(brush, strength, softness);
+        else
+            ClearBrushMaterialProperties(brush);
+
+        DisableBrushShadows(brush);
+        Destroy(brush, safeLife);
+
+        return brush;
+    }
+
+    private void ClearBrushMaterialProperties(GameObject brush)
+    {
+        if (brush == null)
+            return;
+
+        Renderer[] renderers = brush.GetComponentsInChildren<Renderer>();
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer r = renderers[i];
+
+            if (r != null)
+                r.SetPropertyBlock(null);
+        }
+    }
+
     private void SetupBrushMaterial(GameObject brush, float strength, float softness)
     {
         if (brush == null)
