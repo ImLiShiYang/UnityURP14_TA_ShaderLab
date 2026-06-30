@@ -9,6 +9,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         _CloudCoverage ("云裁剪量", Range(0, 1)) = 0.45
         _CloudDensity ("云密度", Range(0, 5)) = 1.2
         _EdgeFalloff ("云边缘柔和度", Range(0.01, 1)) = 0.35
+        _PhaseG ("云前向散射强度", Range(-0.5, 0.8)) = 0.35
 
         [Header(Lighting)]
         _CloudColor ("云颜色", Color) = (1, 1, 1, 1)
@@ -24,6 +25,10 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         [Header(Animation)]
         _WindDirection ("云移动方向", Vector) = (1, 0, 0, 0)
         _WindSpeed ("云移动速度", Range(0, 10)) = 1
+        
+        [Header(Upsample)]
+        _BlurDepthFalloff ("模糊深度保护强度", Range(0, 10)) = 2.0
+        _UpsampleDepthThreshold ("上采样深度阈值", Range(0.0001, 0.1)) = 0.01
     }
 
     SubShader
@@ -48,13 +53,13 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
-        TEXTURE2D_X(_DownsampledFogDepthTexture);
-        SAMPLER(sampler_DownsampledFogDepthTexture);
-        float4 _DownsampledFogDepthTexture_TexelSize;
+        TEXTURE2D_X(_DownsampledCloudDepthTexture);
+        SAMPLER(sampler_DownsampledCloudDepthTexture);
+        float4 _DownsampledCloudDepthTexture_TexelSize;
 
-        TEXTURE2D_X(_VolumeFogTexture);
-        SAMPLER(sampler_VolumeFogTexture);
-        float4 _VolumeFogTexture_TexelSize;
+        TEXTURE2D_X(_VolumeCloudTexture);
+        SAMPLER(sampler_VolumeCloudTexture);
+        float4 _VolumeCloudTexture_TexelSize;
 
         float4 _CameraDepthTexture_TexelSize;
         float4 _BlitTexture_TexelSize;
@@ -62,40 +67,8 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         
 
         CBUFFER_START(UnityPerMaterial)
-            half4 _FogColor;
-            float _FogDensity;
-            float _FogIntensity;
-            float _Extinction;
-            float _MaxDistance;
-            float _SampleCount;
-            float _FogStartDistance;
-
-            float _UseLocalFog;
-            float4 _LocalFogCenter;
-            float4 _LocalFogSize;
-            float _LocalFogSoftness;
-
-            float _NoiseScale;
-            float _NoiseStrength;
-            float _NoiseSpeed;
-            float4 _NoiseDirection;
-
-            float _UseHeightFog;
-            float _FogBaseHeight;
-            float _HeightFalloff;
-
-            float _LightScatter;
-            float _LightPower;
-            float _Anisotropy;
-            float _VolumeLightIntensity;
-            float _AmbientFog;
-            float _ShadowStrength;
-            float _SideScatter;
-
             float _BlurDepthFalloff;
             float _UpsampleDepthThreshold;
-        
-            float _AdditionalLightIntensity;
         
             float4 _CloudBoundsMin;
             float4 _CloudBoundsMax;
@@ -104,6 +77,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             float _CloudCoverage;
             float _CloudDensity;
             float _EdgeFalloff;
+            float _PhaseG;
 
             float4 _CloudColor;
             float _CloudAmbient;
@@ -139,44 +113,12 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             return lerp(perspectiveDepth, orthoDepth, unity_OrthoParams.w);
         }
 
-        float SampleDownsampledFogDepth(float2 uv)
+        float SampleDownsampledCloudDepth(float2 uv)
         {
-            return SAMPLE_TEXTURE2D_X(_DownsampledFogDepthTexture, sampler_PointClamp, uv).r;
+            return SAMPLE_TEXTURE2D_X(_DownsampledCloudDepthTexture, sampler_PointClamp, uv).r;
         }
 
-        float Hash31(float3 p)
-        {
-            p = frac(p * float3(123.34, 456.21, 789.12));
-            p += dot(p, p + 45.32);
-            return frac((p.x + p.y) * p.z);
-        }
-
-        float ValueNoise3D(float3 p)
-        {
-            float3 i = floor(p);
-            float3 f = frac(p);
-
-            float n000 = Hash31(i + float3(0, 0, 0));
-            float n100 = Hash31(i + float3(1, 0, 0));
-            float n010 = Hash31(i + float3(0, 1, 0));
-            float n110 = Hash31(i + float3(1, 1, 0));
-            float n001 = Hash31(i + float3(0, 0, 1));
-            float n101 = Hash31(i + float3(1, 0, 1));
-            float n011 = Hash31(i + float3(0, 1, 1));
-            float n111 = Hash31(i + float3(1, 1, 1));
-
-            float3 u = f * f * (3.0 - 2.0 * f);
-
-            float nx00 = lerp(n000, n100, u.x);
-            float nx10 = lerp(n010, n110, u.x);
-            float nx01 = lerp(n001, n101, u.x);
-            float nx11 = lerp(n011, n111, u.x);
-
-            float nxy0 = lerp(nx00, nx10, u.y);
-            float nxy1 = lerp(nx01, nx11, u.y);
-
-            return lerp(nxy0, nxy1, u.z);
-        }
+        
         
         float Hash(float n)
         {
@@ -245,6 +187,17 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             return ComputeWorldSpacePosition(uv, depth, UNITY_MATRIX_I_VP);
         }
         
+        float GetCloudHeightMask(float3 posWS)
+        {
+            float height01 = saturate((posWS.y - _CloudBoundsMin.y) / (_CloudBoundsMax.y - _CloudBoundsMin.y));
+
+            // 底部渐入，顶部渐出。
+            float bottomFade = smoothstep(0.0, 0.15, height01);
+            float topFade = 1.0 - smoothstep(0.75, 1.0, height01);
+
+            return bottomFade * topFade;
+        }
+        
         float GetCloudDensity(float3 posWS)
         {
             // 取出云盒子的世界空间范围。
@@ -277,19 +230,32 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
 
             // 使用世界坐标采样 FBM 噪声，
             float noise = FBM(posWS * _CloudScale + windOffset);
+            
+            // 高频噪声用来侵蚀云边缘，让云洞和边缘更自然。
+            float detailNoise = FBM(posWS * _CloudScale * 3.0 + windOffset * 1.7);
+            noise -= detailNoise * 0.25;
 
             // 用云量参数裁剪噪声，再用云密度放大结果。
             // _CloudCoverage 越小，云越多；越大，孔洞越多
             // _CloudDensity 越大，云越厚。
             float density = saturate((noise - _CloudCoverage) * _CloudDensity);
 
+            float heightMask = GetCloudHeightMask(posWS);
+            
             // 最终密度 = 噪声密度 * 边缘淡出。
-            return density * edgeMask;
+            return density * edgeMask *heightMask;
         }
         
         float CloudInterleavedGradientNoise(float2 pixelPos)
         {
             return frac(52.9829189 * frac(dot(pixelPos, float2(0.06711056, 0.00583715))));
+        }
+        
+        float HenyeyGreensteinPhase(float g, float cosTheta)
+        {
+            float g2 = g * g;
+            float denom = pow(max(1.0 + g2 - 2.0 * g * cosTheta, 0.0001), 1.5);
+            return (1.0 - g2) / max(0.0001, denom);
         }
         
         float GetCloudLightTransmittance(float3 posWS, float3 lightDir)
@@ -332,7 +298,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
 
         float4 RayMarchCloud(float2 uv)
         {
-            float rawDepth = SampleDownsampledFogDepth(uv);
+            float rawDepth = SampleDownsampledCloudDepth(uv);
 
             bool hasSceneDepth = true;
 
@@ -415,9 +381,13 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
                     float stepAlpha = 1.0 - exp(-opticalDepth);
 
                     float lightTransmittance = GetCloudLightTransmittance(samplePosWS, lightDir);
-
+                    
+                    float cosTheta = dot(rayDir, lightDir);
+                    float phase = HenyeyGreensteinPhase(_PhaseG, cosTheta);
+                    
                     float3 ambientLighting = _CloudColor.rgb * _CloudAmbient;
-                    float3 directLighting = _CloudColor.rgb * sunColor * lightTransmittance;
+                    float3 directLighting = _CloudColor.rgb * sunColor * lightTransmittance*phase;
+                                        
 
                     float3 sampleLighting = ambientLighting + directLighting;
 
@@ -434,169 +404,8 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             // 因为你当前 Composite 是 sceneColor.rgb * fog.a + fog.rgb。
             return float4(cloudColorAccum, transmittance);
         }
-
         
-
-        
-
-        Light GetMainLightWithShadow(float3 positionWS)
-        {
-            #if defined(_MAIN_LIGHT_SHADOWS) || defined(_MAIN_LIGHT_SHADOWS_CASCADE)
-                float4 shadowCoord = TransformWorldToShadowCoord(positionWS);
-                return GetMainLight(shadowCoord);
-            #else
-                return GetMainLight();
-            #endif
-        }
-
-        // Cornette-Shanks 相函数：根据光照方向和观察方向的夹角，计算雾的方向性散射强度。
-        // g 控制散射方向偏向：g > 0 偏前向散射，g = 0 接近均匀散射，g < 0 偏后向散射。
-        // cosTheta 是视线方向和光照方向的夹角余弦值。
-        float CornetteShanksPhase(float g, float cosTheta)
-        {
-            const float MY_PI = 3.14159265;
-            const float MY_FOUR_PI = 12.5663706;
-
-            // 限制参数范围，避免 g 太极端导致体积光爆亮或数值不稳定。
-            g = clamp(g, -0.85, 0.85);
-            cosTheta = clamp(cosTheta, -1.0, 1.0);
-
-            float g2 = g * g;
-
-            // 相函数公式中的分母，max 用来防止分母过小。
-            float denom = pow(max(1.0 + g2 - 2.0 * g * cosTheta, 0.0001), 1.5);
-
-            // Cornette-Shanks 相函数主体。
-            // phase 越大，说明当前角度下光被雾散射到摄像机的强度越高。
-            float phase = (3.0 / (8.0 * MY_PI))
-                        * ((1.0 - g2) / (2.0 + g2))
-                        * ((1.0 + cosTheta * cosTheta) / denom);
-
-            // 乘 4π，把标准相函数结果放大到更适合游戏调参的范围。
-            return phase * MY_FOUR_PI;
-        }
-        
-        float3 GetAdditionalLightsFog(float3 positionWS, float3 rayDir)
-        {
-            float3 result = 0.0;
-
-        #if defined(_ADDITIONAL_LIGHTS)
-            uint lightCount = min((uint)_VolumetricAdditionalLightCount, (uint)GetAdditionalLightsCount());
-            lightCount = min(lightCount, (uint)MAX_VOLUMETRIC_ADDITIONAL_LIGHTS);
-
-            for (uint lightIndex = 0; lightIndex < lightCount; lightIndex++)
-            {
-                float scattering = _VolumetricAdditionalScattering[lightIndex];
-
-                if (scattering <= 0.0001)
-                    continue;
-
-                Light light = GetAdditionalLight(lightIndex, positionWS);
-
-                float cosTheta = dot(rayDir, light.direction);
-                float phase = CornetteShanksPhase(_VolumetricAdditionalAnisotropy[lightIndex], cosTheta);
-
-                result += light.color
-                        * light.distanceAttenuation
-                        * light.shadowAttenuation
-                        * phase
-                        * scattering
-                        * _AdditionalLightIntensity;
-            }
-        #endif
-
-            return result;
-        }
-        
-        
-        float GetLocalBoxMask(float3 worldPos)
-        {
-            float3 halfSize = max(_LocalFogSize.xyz * 0.5, 0.001);
-            float3 localPos = abs(worldPos - _LocalFogCenter.xyz);
-            float3 edgeDistance = halfSize - localPos;
-            float minEdgeDistance = min(edgeDistance.x, min(edgeDistance.y, edgeDistance.z));
-            float inside = step(0.0, minEdgeDistance);
-            float edgeFade = saturate(minEdgeDistance / max(0.001, _LocalFogSoftness));
-            return inside * edgeFade;
-        }
-
-        float GetFogDensity(float3 worldPos)
-        {
-            float density = max(0.0, _FogDensity);
-
-            if (_UseHeightFog > 0.5)
-            {
-                float heightAboveBase = max(0.0, worldPos.y - _FogBaseHeight);
-                density *= exp(-heightAboveBase * _HeightFalloff);
-            }
-
-            float3 noisePos = worldPos * _NoiseScale;
-            float2 noiseDir = _NoiseDirection.xz;
-
-            if (dot(noiseDir, noiseDir) < 0.0001)
-                noiseDir = float2(1.0, 0.0);
-            else
-                noiseDir = normalize(noiseDir);
-
-            noisePos.xz += noiseDir * _Time.y * _NoiseSpeed;
-
-            float noise = ValueNoise3D(noisePos);
-            density *= lerp(1.0, noise, _NoiseStrength);
-
-            if (_UseLocalFog > 0.5)
-                density *= GetLocalBoxMask(worldPos);
-
-            return density;
-        }
-        
-        
-
-        float4 RayMarchFogBuffer(float3 rayOrigin, float3 rayDir, float marchDistance, float jitter)
-        {
-            float startDistance = max(0.0, _FogStartDistance);
-            float effectiveDistance = max(0.0, marchDistance - startDistance);
-
-            int sampleCount = (int)clamp(_SampleCount, 4.0, 64.0);
-            float stepSize = effectiveDistance / sampleCount;
-
-            float transmittance = 1.0;
-            float3 fogColorAccum = 0.0;
-
-            for (int i = 0; i < 64; i++)
-            {
-                if (i >= sampleCount)
-                    break;
-
-                float dist = startDistance + (i + jitter) * stepSize;
-                float3 samplePosWS = rayOrigin + rayDir * dist;
-
-                float density = GetFogDensity(samplePosWS);
-                float stepDensity = density * stepSize;
-                float stepAlpha = 1.0 - exp(-stepDensity);
-
-                Light mainLight = GetMainLightWithShadow(samplePosWS);
-
-                float cosTheta = dot(rayDir, mainLight.direction);
-                float phase = CornetteShanksPhase(_Anisotropy, cosTheta);
-
-                float scatterAmount = _SideScatter + phase * _LightScatter;
-                float shadowAttenuation = lerp(1.0, mainLight.shadowAttenuation, saturate(_ShadowStrength));
-
-                float3 ambientFog = _FogColor.rgb * _FogIntensity * _AmbientFog;
-                float3 directFog = _FogColor.rgb * mainLight.color * _FogIntensity * scatterAmount * _VolumeLightIntensity * shadowAttenuation;
                 
-                float3 additionalFog = _FogColor.rgb * _FogIntensity * GetAdditionalLightsFog(samplePosWS, rayDir);
-                float3 fogLighting = ambientFog + directFog + additionalFog;
-
-                fogColorAccum += transmittance * stepAlpha * fogLighting;
-                transmittance *= exp(-stepDensity * max(0.001, _Extinction));
-
-                if (transmittance < 0.01)
-                    break;
-            }
-
-            return float4(fogColorAccum, transmittance);
-        }
 
         // 降采样深度 Pass。
         // 从当前 uv 附近采样 4 个深度点，选出离摄像机最近的深度写入低分辨率深度图。
@@ -650,7 +459,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             static const float weights[5] = { 0.2026, 0.1790, 0.1240, 0.0672, 0.0285 };
 
             float4 center = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_PointClamp, uv);
-            float centerDepth = SampleDownsampledFogDepth(uv);
+            float centerDepth = SampleDownsampledCloudDepth(uv);
             float centerEyeDepth = LinearEyeDepthConsiderProjection(centerDepth);
 
             float3 rgb = center.rgb * weights[0];
@@ -664,8 +473,8 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
                 float2 uvA = uv - stepUV * i;
                 float2 uvB = uv + stepUV * i;
 
-                float depthA = SampleDownsampledFogDepth(uvA);
-                float depthB = SampleDownsampledFogDepth(uvB);
+                float depthA = SampleDownsampledCloudDepth(uvA);
+                float depthB = SampleDownsampledCloudDepth(uvB);
 
                 float eyeA = LinearEyeDepthConsiderProjection(depthA);
                 float eyeB = LinearEyeDepthConsiderProjection(depthB);
@@ -692,13 +501,13 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             return DepthAwareBlur(input.texcoord, float2(0, 1));
         }
 
-        float4 DepthAwareUpsampleFog(float2 uv)
+        float4 DepthAwareUpsampleCloud(float2 uv)
         {
             float fullDepth = SampleSceneDepth(uv);
             float fullEyeDepth = LinearEyeDepthConsiderProjection(fullDepth);
             float threshold = max(0.01, fullEyeDepth * _UpsampleDepthThreshold);
 
-            float2 halfTexel = _DownsampledFogDepthTexture_TexelSize.xy * 0.5;
+            float2 halfTexel = _DownsampledCloudDepthTexture_TexelSize.xy * 0.5;
             float2 uvs[4] =
             {
                 uv + float2(-halfTexel.x, -halfTexel.y),
@@ -714,7 +523,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             UNITY_UNROLL
             for (int i = 0; i < 4; i++)
             {
-                float d = SampleDownsampledFogDepth(uvs[i]);
+                float d = SampleDownsampledCloudDepth(uvs[i]);
                 float eye = LinearEyeDepthConsiderProjection(d);
                 float diff = abs(fullEyeDepth - eye);
 
@@ -729,9 +538,9 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             }
 
             if (validCount == 4)
-                return SAMPLE_TEXTURE2D_X(_VolumeFogTexture, sampler_LinearClamp, uv);
+                return SAMPLE_TEXTURE2D_X(_VolumeCloudTexture, sampler_LinearClamp, uv);
 
-            return SAMPLE_TEXTURE2D_X(_VolumeFogTexture, sampler_PointClamp, nearestUv);
+            return SAMPLE_TEXTURE2D_X(_VolumeCloudTexture, sampler_PointClamp, nearestUv);
         }
 
         float4 CompositeFrag(Varyings input) : SV_Target
@@ -739,9 +548,9 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             float2 uv = input.texcoord;
 
             float4 sceneColor = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
-            float4 fog = DepthAwareUpsampleFog(uv);
+            float4 cloud = DepthAwareUpsampleCloud(uv);
 
-            float3 finalColor = sceneColor.rgb * fog.a + fog.rgb;
+            float3 finalColor = sceneColor.rgb * cloud.a + cloud.rgb;
             return float4(finalColor, sceneColor.a);
         }
 
@@ -767,7 +576,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
 
         Pass
         {
-            Name "VolumeFogHorizontalBlur"
+            Name "VolumeCloudHorizontalBlur"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment HorizontalBlurFrag
@@ -776,7 +585,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
 
         Pass
         {
-            Name "VolumeFogVerticalBlur"
+            Name "VolumeCloudVerticalBlur"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment VerticalBlurFrag
@@ -785,7 +594,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
 
         Pass
         {
-            Name "VolumeFogComposite"
+            Name "VolumeCloudComposite"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment CompositeFrag

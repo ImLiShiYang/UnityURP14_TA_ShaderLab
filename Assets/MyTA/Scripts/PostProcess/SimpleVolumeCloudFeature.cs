@@ -77,11 +77,11 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
 
     private class SimpleVolumeCloudPass : ScriptableRenderPass
     {
-        private static readonly int DownsampledFogDepthTextureId =
-            Shader.PropertyToID("_DownsampledFogDepthTexture");
+        private static readonly int DownsampledCloudDepthTextureId =
+            Shader.PropertyToID("_DownsampledCloudDepthTexture");
 
-        private static readonly int VolumeFogTextureId =
-            Shader.PropertyToID("_VolumeFogTexture");
+        private static readonly int VolumeCloudTextureId =
+            Shader.PropertyToID("_VolumeCloudTexture");
 
         private readonly Settings settings;
         private readonly ProfilingSampler profilingSampler = new ProfilingSampler("Simple Volume Cloud");
@@ -223,7 +223,7 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                 Material material = settings.cloudMaterial;
 
                 // 1. 生成低分辨率深度图。
-                // Shader 里 RayMarchCloud 会通过 _DownsampledFogDepthTexture 读取它。
+                // Shader 里 RayMarchCloud 会通过 _DownsampledCloudDepthTexture 读取它。
                 Blitter.BlitCameraTexture(
                     cmd,
                     cameraColorTarget,
@@ -232,7 +232,7 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                     downsampleDepthPass
                 );
 
-                cmd.SetGlobalTexture(DownsampledFogDepthTextureId, downsampledDepthTexture);
+                cmd.SetGlobalTexture(DownsampledCloudDepthTextureId, downsampledDepthTexture);
 
                 // 2. 渲染体积云。
                 // 这里输出的不是普通颜色，而是：
@@ -268,9 +268,9 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                     );
                 }
 
-                // 4. 这里暂时仍然设置到 _VolumeFogTexture。
+                // 4. 这里暂时仍然设置到 _VolumeCloudTexture。
                 // 因为你当前 Shader 的 CompositeFrag / DepthAwareUpsampleFog 还在读取这个名字。
-                cmd.SetGlobalTexture(VolumeFogTextureId, volumeCloudTexture);
+                cmd.SetGlobalTexture(VolumeCloudTextureId, volumeCloudTexture);
 
                 // 5. 合成到相机颜色。
                 Blitter.BlitCameraTexture(
