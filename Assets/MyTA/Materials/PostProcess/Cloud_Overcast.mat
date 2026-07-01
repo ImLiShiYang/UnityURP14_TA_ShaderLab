@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: VolumeCloudeMat
+  m_Name: Cloud_Overcast
   m_Shader: {fileID: 4800000, guid: 877d10c34f5a6844889d33b42c81b043, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
@@ -101,17 +101,17 @@ Material:
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
-    - _CloudAmbient: 0.25
-    - _CloudBottomDarkness: 0.26
-    - _CloudCoverage: 0.493
-    - _CloudDensity: 0.45
-    - _CloudMapScale: 0.008
-    - _CloudMapStrength: 0.924
-    - _CloudScale: 0.015
+    - _CloudAmbient: 0.316
+    - _CloudBottomDarkness: 0.346
+    - _CloudCoverage: 0.283
+    - _CloudDensity: 1.1
+    - _CloudMapScale: 0.0114
+    - _CloudMapStrength: 0.25
+    - _CloudScale: 0.01
     - _CloudShadowHeight: 55
-    - _CloudShadowSoftness: 0.25
-    - _CloudShadowStrength: 0.181
-    - _CloudShadowThreshold: 0.35
+    - _CloudShadowSoftness: 0.5
+    - _CloudShadowStrength: 0.432
+    - _CloudShadowThreshold: 0.424
     - _Cull: 2
     - _Cutoff: 0.5
     - _DebugMode: 0
@@ -119,32 +119,32 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EdgeFalloff: 0.25
+    - _EdgeFalloff: 0.361
     - _EnvironmentReflections: 1
     - _ErosionNoiseScale: 4
-    - _ErosionStrength: 0.25
-    - _ExtinctionCoeff: 0.25
+    - _ErosionStrength: 0.527
+    - _ExtinctionCoeff: 0.7
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
-    - _LightStepCount: 3
+    - _LightStepCount: 4
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
-    - _PhaseG: 0.35
-    - _PowderStrength: 0.72
+    - _PhaseG: 0.2
+    - _PowderStrength: 0.33
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _SilverLiningPower: 8
-    - _SilverLiningStrength: 0.77
+    - _SilverLiningPower: 12
+    - _SilverLiningStrength: 0.11
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
-    - _StepCount: 24
+    - _StepCount: 32
     - _StepJitter: 0.5
-    - _SunIntensity: 1
+    - _SunIntensity: 0.58
     - _Surface: 0
     - _TemporalBlendFactor: 0.75
     - _TemporalCloudChangeThreshold: 0.35
@@ -156,9 +156,9 @@ Material:
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
-    - _CloudBoundsMax: {r: 80, g: 80, b: 80, a: 0}
-    - _CloudBoundsMin: {r: -80, g: 35, b: -80, a: 0}
-    - _CloudColor: {r: 1, g: 1, b: 1, a: 1}
+    - _CloudBoundsMax: {r: 160, g: 130, b: 160, a: 0}
+    - _CloudBoundsMin: {r: -160, g: 55, b: -160, a: 0}
+    - _CloudColor: {r: 0.31372544, g: 0.33725488, b: 0.36078432, a: 1}
     - _CloudMapOffset: {r: 0, g: 0, b: 0, a: 0}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}

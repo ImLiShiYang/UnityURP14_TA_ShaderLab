@@ -7,11 +7,12 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: VolumeCloudeMat
-  m_Shader: {fileID: 4800000, guid: 877d10c34f5a6844889d33b42c81b043, type: 3}
+  m_Name: Skybox_Overcast
+  m_Shader: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords: []
+  m_ValidKeywords:
+  - _SUNDISK_HIGH_QUALITY
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
@@ -23,24 +24,16 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _BackTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _BaseMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
         m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _CloudErosionNoiseTex:
-        m_Texture: {fileID: 11700000, guid: d1aae012f8a4f23478471851f17ff915, type: 3}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _CloudMapTex:
-        m_Texture: {fileID: 2800000, guid: 0c1e1eec03acca5458f3df16a7d7786b, type: 3}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _CloudShapeNoiseTex:
-        m_Texture: {fileID: 11700000, guid: 1fe54a721d0e2504e89f121c723404a8, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _DetailAlbedoMap:
@@ -55,7 +48,19 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _DownTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FrontTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _LeftTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -75,7 +80,15 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _RightTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _SpecGlossMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _UpTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -95,77 +108,48 @@ Material:
     m_Floats:
     - _AlphaClip: 0
     - _AlphaToMask: 0
+    - _AtmosphereThickness: 0.8
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
-    - _BlurDepthFalloff: 2
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
-    - _CloudAmbient: 0.25
-    - _CloudBottomDarkness: 0.26
-    - _CloudCoverage: 0.493
-    - _CloudDensity: 0.45
-    - _CloudMapScale: 0.008
-    - _CloudMapStrength: 0.924
-    - _CloudScale: 0.015
-    - _CloudShadowHeight: 55
-    - _CloudShadowSoftness: 0.25
-    - _CloudShadowStrength: 0.181
-    - _CloudShadowThreshold: 0.35
     - _Cull: 2
     - _Cutoff: 0.5
-    - _DebugMode: 0
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EdgeFalloff: 0.25
     - _EnvironmentReflections: 1
-    - _ErosionNoiseScale: 4
-    - _ErosionStrength: 0.25
-    - _ExtinctionCoeff: 0.25
+    - _Exposure: 0.64
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
-    - _LightStepCount: 3
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
-    - _PhaseG: 0.35
-    - _PowderStrength: 0.72
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _SilverLiningPower: 8
-    - _SilverLiningStrength: 0.77
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
-    - _StepCount: 24
-    - _StepJitter: 0.5
-    - _SunIntensity: 1
+    - _SunDisk: 2
+    - _SunSize: 0.04
+    - _SunSizeConvergence: 5
     - _Surface: 0
-    - _TemporalBlendFactor: 0.75
-    - _TemporalCloudChangeThreshold: 0.35
-    - _TemporalDepthThreshold: 2
-    - _TemporalMinBlendOnCloudChange: 0.1
-    - _UpsampleDepthThreshold: 0.01
-    - _WindSpeed: 3.45
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
-    - _CloudBoundsMax: {r: 80, g: 80, b: 80, a: 0}
-    - _CloudBoundsMin: {r: -80, g: 35, b: -80, a: 0}
-    - _CloudColor: {r: 1, g: 1, b: 1, a: 1}
-    - _CloudMapOffset: {r: 0, g: 0, b: 0, a: 0}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _GroundColor: {r: 0.21568617, g: 0.25490195, b: 0.22745098, a: 1}
+    - _SkyTint: {r: 0.27450976, g: 0.3215686, b: 0.37254903, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
-    - _WindDirection: {r: 1, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
---- !u!114 &8356642228660593870
+--- !u!114 &8040319093837229744
 MonoBehaviour:
   m_ObjectHideFlags: 11
   m_CorrespondingSourceObject: {fileID: 0}
