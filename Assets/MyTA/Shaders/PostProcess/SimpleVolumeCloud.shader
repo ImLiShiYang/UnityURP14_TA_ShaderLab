@@ -34,6 +34,12 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         [Header(Upsample)]
         _BlurDepthFalloff ("模糊深度保护强度", Range(0, 10)) = 2.0
         _UpsampleDepthThreshold ("上采样深度阈值", Range(0.0001, 0.1)) = 0.01
+
+        [Header(Temporal)]
+        _TemporalBlendFactor ("上一帧混合权重", Range(0, 0.95)) = 0.75
+        _TemporalDepthThreshold ("历史深度拒绝阈值", Float) = 2.0
+        _TemporalCloudChangeThreshold ("云变化拒绝阈值", Range(0.01, 2)) = 0.35
+        _TemporalMinBlendOnCloudChange ("云变化时最小历史权重", Range(0, 0.5)) = 0.1
         
         [Header(Cloud Noise Texture)]
         [NoScaleOffset]_CloudShapeNoiseTex ("云形状噪声 3D", 3D) = "white" {}
@@ -87,6 +93,12 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         SAMPLER(sampler_VolumeCloudTexture);
         float4 _VolumeCloudTexture_TexelSize;
 
+        TEXTURE2D_X(_CloudHistoryTexture);
+        SAMPLER(sampler_CloudHistoryTexture);
+
+        TEXTURE2D_X(_CloudHistoryDepthTexture);
+        SAMPLER(sampler_CloudHistoryDepthTexture);
+
         float4 _CameraDepthTexture_TexelSize;
         float4 _BlitTexture_TexelSize;
         
@@ -102,6 +114,11 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
         CBUFFER_START(UnityPerMaterial)
             float _BlurDepthFalloff;
             float _UpsampleDepthThreshold;
+            float _TemporalBlendFactor;
+            float _TemporalDepthThreshold;
+            float _TemporalCloudChangeThreshold;
+            float _TemporalMinBlendOnCloudChange;
+            float4x4 _PreviousViewProjectionMatrix;
         
             float4 _CloudBoundsMin;
             float4 _CloudBoundsMax;
@@ -676,6 +693,133 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             return DepthAwareBlur(input.texcoord, float2(0, 1));
         }
 
+        float SampleHistoryDepth(float2 uv)
+        {
+            return SAMPLE_TEXTURE2D_X(_CloudHistoryDepthTexture, sampler_PointClamp, uv).r;
+        }
+
+        bool TryGetCloudHistoryUV(float2 uv, out float2 historyUV, out float currentEyeDepth)
+        {
+            historyUV = uv;
+
+            float rawDepth = SampleDownsampledCloudDepth(uv);
+            currentEyeDepth = LinearEyeDepthConsiderProjection(rawDepth);
+
+            bool hasSceneDepth = true;
+
+            #if UNITY_REVERSED_Z
+                hasSceneDepth = rawDepth > 0.0001;
+            #else
+                hasSceneDepth = rawDepth < 0.9999;
+            #endif
+
+            float rayDepth = rawDepth;
+
+            if (!hasSceneDepth)
+            {
+                #if UNITY_REVERSED_Z
+                    rayDepth = 0.0001;
+                #else
+                    rayDepth = 0.9999;
+                #endif
+            }
+
+            float3 worldPos = GetWorldPositionFromDepth(uv, rayDepth);
+            float3 cameraPosWS = GetCameraPositionWS();
+
+            float3 cameraToPixel = worldPos - cameraPosWS;
+            float sceneDistance = length(cameraToPixel);
+            float3 rayDir = sceneDistance > 0.0001 ? cameraToPixel / sceneDistance : float3(0, 0, 1);
+
+            if (!hasSceneDepth)
+                sceneDistance = 1e20;
+
+            float tNear;
+            float tFar;
+
+            if (!IntersectBox(cameraPosWS, rayDir, _CloudBoundsMin.xyz, _CloudBoundsMax.xyz, tNear, tFar))
+                return false;
+
+            tNear = max(tNear, 0.0);
+            tFar = min(tFar, sceneDistance);
+
+            if (tFar <= tNear)
+                return false;
+
+            // 当前云图没有单独保存“最浓云点深度”，这里先用云盒内射线中点近似。
+            float historyT = lerp(tNear, tFar, 0.5);
+            float3 cloudPosWS = cameraPosWS + rayDir * historyT;
+
+            float4 previousClipPos = mul(_PreviousViewProjectionMatrix, float4(cloudPosWS, 1.0));
+
+            if (previousClipPos.w <= 0.0001)
+                return false;
+
+            #if UNITY_UV_STARTS_AT_TOP
+                previousClipPos.y = -previousClipPos.y;
+            #endif
+
+            historyUV = previousClipPos.xy / previousClipPos.w;
+            historyUV = historyUV * 0.5 + 0.5;
+
+            bool insideHistory =
+                historyUV.x >= 0.0 && historyUV.x <= 1.0 &&
+                historyUV.y >= 0.0 && historyUV.y <= 1.0;
+
+            return insideHistory;
+        }
+
+        float4 TemporalBlendFrag(Varyings input) : SV_Target
+        {
+            float2 uv = input.texcoord;
+
+            // 当前帧刚 raymarch 得到的体积云结果。
+            float4 currentCloud = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
+
+            float2 historyUV;
+            float currentEyeDepth;
+
+            // 通过重投影找到上一帧对应的屏幕位置。
+            // 如果找不到可靠的历史位置，就直接使用当前帧。
+            if (!TryGetCloudHistoryUV(uv, historyUV, currentEyeDepth))
+                return currentCloud;
+
+            // 采样上一帧保存的体积云结果。
+            float4 historyCloud = SAMPLE_TEXTURE2D_X(_CloudHistoryTexture, sampler_LinearClamp, historyUV);
+
+            // 用深度差判断历史帧是否可靠。
+            // 深度差越大，说明遮挡或重投影可能不准，历史权重越低。
+            float historyRawDepth = SampleHistoryDepth(historyUV);
+            float historyEyeDepth = LinearEyeDepthConsiderProjection(historyRawDepth);
+            float depthDiff = abs(currentEyeDepth - historyEyeDepth);
+            float depthAccept = 1.0 - smoothstep(_TemporalDepthThreshold, _TemporalDepthThreshold * 2.0, depthDiff);
+
+            // 比较当前帧和上一帧的云颜色/透射率差异。
+            // 差异越大，说明云变化越明显，历史权重越低。
+            float cloudDiff =
+                length(currentCloud.rgb - historyCloud.rgb) +
+                abs(currentCloud.a - historyCloud.a);
+
+            float cloudAccept = 1.0 - smoothstep(
+                _TemporalCloudChangeThreshold * 0.5,
+                _TemporalCloudChangeThreshold,
+                cloudDiff
+            );
+
+            // 云变化很大时，也保留一点最小历史权重，避免画面突然跳变。
+            float cloudChangeWeight = lerp(
+                saturate(_TemporalMinBlendOnCloudChange),
+                1.0,
+                cloudAccept
+            );
+
+            // 最终历史帧权重 = 基础权重 * 深度可信度 * 云变化可信度。
+            float historyWeight = saturate(_TemporalBlendFactor) * depthAccept * cloudChangeWeight;
+
+            // 当前帧和上一帧混合，减少体积云闪烁和噪点。
+            return lerp(currentCloud, historyCloud, historyWeight);
+        }
+
         float4 DepthAwareUpsampleCloud(float2 uv)
         {
             float fullDepth = SampleSceneDepth(uv);
@@ -844,6 +988,15 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment VerticalBlurFrag
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "VolumeCloudTemporalBlend"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment TemporalBlendFrag
             ENDHLSL
         }
 

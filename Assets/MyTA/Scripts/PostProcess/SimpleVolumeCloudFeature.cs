@@ -24,6 +24,34 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
 
         [Tooltip("是否影响 Scene 视图。")]
         public bool affectSceneView = true;
+
+        [Tooltip("是否启用时间累积。开启后会把当前帧体积云和上一帧体积云混合，用来减少闪烁和噪点。")]
+        public bool enableTemporalAccumulation = true;
+
+        [Tooltip("相机基本静止时，上一帧体积云的混合权重。数值越大越稳定，但也越容易有拖影。")]
+        [Range(0f, 0.95f)]
+        public float temporalBlend = 0.75f;
+
+        [Tooltip("相机快速移动时，上一帧体积云的混合权重。建议比静止时低，避免明显残影。")]
+        [Range(0f, 0.95f)]
+        public float fastCameraTemporalBlend = 0.2f;
+
+        [Tooltip("相机单帧移动距离超过这个值时，认为相机正在快速移动，并切换到快速移动混合权重。")]
+        public float fastCameraPositionThreshold = 0.25f;
+
+        [Tooltip("相机单帧旋转角度超过这个值时，认为相机正在快速旋转，并切换到快速移动混合权重。")]
+        public float fastCameraAngleThreshold = 2.0f;
+
+        [Tooltip("当前帧深度和上一帧深度差超过这个范围时，会减少或拒绝上一帧体积云，避免物体边缘残影。")]
+        public float temporalDepthThreshold = 2.0f;
+
+        [Tooltip("当前帧体积云和上一帧体积云差异超过这个范围时，会降低上一帧权重，避免云变化时产生拖影。")]
+        [Range(0.01f, 2.0f)]
+        public float temporalCloudChangeThreshold = 0.35f;
+
+        [Tooltip("当体积云变化很大时，仍然保留的最小上一帧混合权重。数值越大越稳定，但残影也可能更明显。")]
+        [Range(0f, 0.5f)]
+        public float temporalMinBlendOnCloudChange = 0.1f;
     }
 
     public Settings settings = new Settings();
@@ -83,6 +111,27 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
         private static readonly int VolumeCloudTextureId =
             Shader.PropertyToID("_VolumeCloudTexture");
 
+        private static readonly int CloudHistoryTextureId =
+            Shader.PropertyToID("_CloudHistoryTexture");
+
+        private static readonly int CloudHistoryDepthTextureId =
+            Shader.PropertyToID("_CloudHistoryDepthTexture");
+
+        private static readonly int TemporalBlendFactorId =
+            Shader.PropertyToID("_TemporalBlendFactor");
+
+        private static readonly int PreviousViewProjectionMatrixId =
+            Shader.PropertyToID("_PreviousViewProjectionMatrix");
+
+        private static readonly int TemporalDepthThresholdId =
+            Shader.PropertyToID("_TemporalDepthThreshold");
+
+        private static readonly int TemporalCloudChangeThresholdId =
+            Shader.PropertyToID("_TemporalCloudChangeThreshold");
+
+        private static readonly int TemporalMinBlendOnCloudChangeId =
+            Shader.PropertyToID("_TemporalMinBlendOnCloudChange");
+
         private readonly Settings settings;
         private readonly ProfilingSampler profilingSampler = new ProfilingSampler("Simple Volume Cloud");
 
@@ -90,13 +139,25 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
         private RTHandle downsampledDepthTexture;
         private RTHandle volumeCloudTexture;
         private RTHandle volumeCloudBlurTexture;
+        private RTHandle temporalCloudTexture;
+        private RTHandle cloudHistoryTexture;
+        private RTHandle cloudHistoryDepthTexture;
         private RTHandle compositeTexture;
 
         private int downsampleDepthPass = -1;
         private int volumeCloudRenderPass = -1;
         private int horizontalBlurPass = -1;
         private int verticalBlurPass = -1;
+        private int temporalBlendPass = -1;
         private int compositePass = -1;
+
+        private bool historyValid;
+        private int historyCameraId = -1;
+        private int historyWidth = -1;
+        private int historyHeight = -1;
+        private Vector3 previousCameraPosition;
+        private Quaternion previousCameraRotation = Quaternion.identity;
+        private Matrix4x4 previousViewProjectionMatrix = Matrix4x4.identity;
 
         public SimpleVolumeCloudPass(Settings settings)
         {
@@ -138,6 +199,8 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                 "VolumeCloudVerticalBlur",
                 "VolumeFogVerticalBlur"
             );
+
+            temporalBlendPass = material.FindPass("VolumeCloudTemporalBlend");
 
             compositePass = FindPassWithFallback(
                 material,
@@ -184,6 +247,37 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
             );
 
             RenderingUtils.ReAllocateIfNeeded(
+                ref temporalCloudTexture,
+                cloudDescriptor,
+                FilterMode.Bilinear,
+                TextureWrapMode.Clamp,
+                name: "_VolumeCloudTemporal"
+            );
+
+            RenderingUtils.ReAllocateIfNeeded(
+                ref cloudHistoryTexture,
+                cloudDescriptor,
+                FilterMode.Bilinear,
+                TextureWrapMode.Clamp,
+                name: "_VolumeCloudHistory"
+            );
+
+            RenderingUtils.ReAllocateIfNeeded(
+                ref cloudHistoryDepthTexture,
+                depthDescriptor,
+                FilterMode.Point,
+                TextureWrapMode.Clamp,
+                name: "_VolumeCloudHistoryDepth"
+            );
+
+            if (historyWidth != cloudDescriptor.width || historyHeight != cloudDescriptor.height)
+            {
+                historyValid = false;
+                historyWidth = cloudDescriptor.width;
+                historyHeight = cloudDescriptor.height;
+            }
+
+            RenderingUtils.ReAllocateIfNeeded(
                 ref compositeTexture,
                 cameraDescriptor,
                 FilterMode.Bilinear,
@@ -198,6 +292,9 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                 downsampledDepthTexture == null ||
                 volumeCloudTexture == null ||
                 volumeCloudBlurTexture == null ||
+                temporalCloudTexture == null ||
+                cloudHistoryTexture == null ||
+                cloudHistoryDepthTexture == null ||
                 compositeTexture == null ||
                 settings.cloudMaterial == null)
             {
@@ -221,6 +318,7 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 Material material = settings.cloudMaterial;
+                RTHandle cloudForComposite = volumeCloudTexture;
 
                 // 1. 生成低分辨率深度图。
                 // Shader 里 RayMarchCloud 会通过 _DownsampledCloudDepthTexture 读取它。
@@ -268,9 +366,53 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                     );
                 }
 
+                float temporalBlendFactor = GetTemporalBlendFactor(ref renderingData);
+
+                if (settings.enableTemporalAccumulation && temporalBlendPass >= 0)
+                {
+                    if (temporalBlendFactor > 0.0f)
+                    {
+                        material.SetFloat(TemporalBlendFactorId, temporalBlendFactor);
+                        material.SetMatrix(PreviousViewProjectionMatrixId, previousViewProjectionMatrix);
+                        material.SetFloat(TemporalDepthThresholdId, Mathf.Max(0.001f, settings.temporalDepthThreshold));
+                        material.SetFloat(TemporalCloudChangeThresholdId, Mathf.Max(0.01f, settings.temporalCloudChangeThreshold));
+                        material.SetFloat(TemporalMinBlendOnCloudChangeId, Mathf.Clamp01(settings.temporalMinBlendOnCloudChange));
+                        cmd.SetGlobalTexture(CloudHistoryTextureId, cloudHistoryTexture);
+                        cmd.SetGlobalTexture(CloudHistoryDepthTextureId, cloudHistoryDepthTexture);
+
+                        Blitter.BlitCameraTexture(
+                            cmd,
+                            volumeCloudTexture,
+                            temporalCloudTexture,
+                            material,
+                            temporalBlendPass
+                        );
+
+                        cloudForComposite = temporalCloudTexture;
+                    }
+
+                    Blitter.BlitCameraTexture(
+                        cmd,
+                        cloudForComposite,
+                        cloudHistoryTexture
+                    );
+
+                    Blitter.BlitCameraTexture(
+                        cmd,
+                        downsampledDepthTexture,
+                        cloudHistoryDepthTexture
+                    );
+
+                    UpdateHistoryCamera(ref renderingData);
+                }
+                else
+                {
+                    historyValid = false;
+                }
+
                 // 4. 这里暂时仍然设置到 _VolumeCloudTexture。
                 // 因为你当前 Shader 的 CompositeFrag / DepthAwareUpsampleFog 还在读取这个名字。
-                cmd.SetGlobalTexture(VolumeCloudTextureId, volumeCloudTexture);
+                cmd.SetGlobalTexture(VolumeCloudTextureId, cloudForComposite);
 
                 // 5. 合成到相机颜色。
                 Blitter.BlitCameraTexture(
@@ -297,7 +439,57 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
             downsampledDepthTexture?.Release();
             volumeCloudTexture?.Release();
             volumeCloudBlurTexture?.Release();
+            temporalCloudTexture?.Release();
+            cloudHistoryTexture?.Release();
+            cloudHistoryDepthTexture?.Release();
             compositeTexture?.Release();
+        }
+
+        // 根据相机上一帧到当前帧的移动/旋转幅度，动态决定历史帧混合权重：
+        // 相机静止时多混上一帧，减少闪烁；相机快速移动时少混上一帧，避免拖影。
+        private float GetTemporalBlendFactor(ref RenderingData renderingData)
+        {
+            if (!settings.enableTemporalAccumulation || !historyValid)
+                return 0.0f;
+
+            Camera camera = renderingData.cameraData.camera;
+            if (camera == null || camera.GetInstanceID() != historyCameraId)
+                return 0.0f;
+
+            Transform cameraTransform = camera.transform;
+            float positionDelta = Vector3.Distance(cameraTransform.position, previousCameraPosition);
+            float angleDelta = Quaternion.Angle(cameraTransform.rotation, previousCameraRotation);
+
+            bool cameraMovedFast =
+                positionDelta > Mathf.Max(0.0f, settings.fastCameraPositionThreshold) ||
+                angleDelta > Mathf.Max(0.0f, settings.fastCameraAngleThreshold);
+
+            float blend = cameraMovedFast ? settings.fastCameraTemporalBlend : settings.temporalBlend;
+            return Mathf.Clamp01(blend);
+        }
+
+        private void UpdateHistoryCamera(ref RenderingData renderingData)
+        {
+            Camera camera = renderingData.cameraData.camera;
+            if (camera == null)
+            {
+                historyValid = false;
+                historyCameraId = -1;
+                return;
+            }
+
+            Transform cameraTransform = camera.transform;
+            historyValid = true;
+            historyCameraId = camera.GetInstanceID();
+            previousCameraPosition = cameraTransform.position;
+            previousCameraRotation = cameraTransform.rotation;
+            previousViewProjectionMatrix = GetViewProjectionMatrix(ref renderingData);
+        }
+
+        private static Matrix4x4 GetViewProjectionMatrix(ref RenderingData renderingData)
+        {
+            CameraData cameraData = renderingData.cameraData;
+            return cameraData.GetGPUProjectionMatrixNoJitter() * cameraData.GetViewMatrix();
         }
 
         private static int FindPassWithFallback(Material material, string primaryName, string fallbackName)
