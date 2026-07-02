@@ -190,7 +190,11 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 630989f1bef9f6f4ca8fcff40282f084,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1899855183}
   m_SourcePrefab: {fileID: 100100000, guid: 630989f1bef9f6f4ca8fcff40282f084, type: 3}
 --- !u!1 &379333643
 GameObject:
@@ -485,13 +489,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 600159010}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
-  m_LocalPosition: {x: 0, y: 3, z: 0}
+  m_LocalRotation: {x: 0.38885275, y: -0.21524526, z: 0.037293036, w: 0.89502645}
+  m_LocalPosition: {x: 58.290245, y: 3.254, z: 10.74}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
+  m_LocalEulerAnglesHint: {x: 45.408, y: -30.498, z: -8.242}
 --- !u!114 &600159013
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -515,6 +519,30 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 0
+--- !u!1 &1899855180 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 630989f1bef9f6f4ca8fcff40282f084,
+    type: 3}
+  m_PrefabInstance: {fileID: 311312621}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1899855183
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1899855180}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3544ee57d3b0c5c4ab9d7d51886569c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  rotateSpeed: 30
+  autoRotateOnStart: 0
+  useWorldY: 1
+  showButton: 1
+  buttonWidth: 120
+  buttonHeight: 40
 --- !u!1 &2144172543
 GameObject:
   m_ObjectHideFlags: 0
@@ -673,7 +701,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 66008dd8cf0bce042baadbce4e408584, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 5
+  moveSpeed: 1
   rotateSpeed: 2
   scrollSpeed: 10
   speedMultiplier: 3
