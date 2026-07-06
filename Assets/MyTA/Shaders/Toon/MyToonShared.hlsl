@@ -13,6 +13,9 @@ float _Cull;
 float _UseAlphaClipping;
 float _Cutoff;
 float _DebugMode;
+float _FeatureDebugMode;
+
+
 
 float _IsFace;
 float _ReceiveShadowStrength;
@@ -20,6 +23,67 @@ float _MinLight;
 float _FaceMinLight;
 float _FaceShadowColorStrength;
 float _ReceiveShadowMappingPosOffset;
+
+float _UseFaceSDF;
+float _FaceSDFShadowThreshold;
+float _FaceSDFShadowSoftness;
+float _FaceSDFShadowStrength;
+float _FaceSDFFrontOffset;
+float _FaceSDFInvert;
+
+float _UseToonRamp;
+float _ToonRampStrength;
+float _ToonRampOffset;
+float _ToonRampContrast;
+float _ToonRampInvert;
+
+float _UseHeightGradient;
+float4 _HeightGradientTopColor;
+float4 _HeightGradientBottomColor;
+float _HeightGradientMin;
+float _HeightGradientMax;
+float _HeightGradientStrength;
+
+float _UseOcclusion;
+float _OcclusionStrength;
+float4 _OcclusionMapChannelMask;
+float _OcclusionRemapStart;
+float _OcclusionRemapEnd;
+
+float _UseEmission;
+float4 _EmissionColor;
+float _EmissionMulByBaseColor;
+float4 _EmissionMapChannelMask;
+
+float _UseSpecular;
+float4 _SpecularColor;
+float _SpecularIntensity;
+float _SpecularThreshold;
+float _SpecularSoftness;
+
+float _UseHairSpecular;
+float _HairSpecularUseBitangent;
+float4 _HairSpecularColor;
+float _HairSpecularIntensity;
+float _HairSpecularPower;
+float _HairSpecularThreshold;
+float _HairSpecularSoftness;
+float _HairSpecularShift;
+float _HairSpecularDirectionAtten;
+
+float _UseHairSecondarySpecular;
+float4 _HairSecondarySpecularColor;
+float _HairSecondarySpecularIntensity;
+float _HairSecondarySpecularPower;
+float _HairSecondarySpecularShift;
+
+float _UseMatCap;
+float4 _MatCapColor;
+float _MatCapIntensity;
+float _MatCapBlendBaseColor;
+
+float _DirectLightMultiplier;
+float _MainLightIgnoreCelShade;
 
 float4 _IndirectLightMinColor;
 float _IndirectLightMultiplier;
@@ -39,6 +103,21 @@ float _RimThreshold;
 float _RimSoftness;
 CBUFFER_END
 
+TEXTURE2D(_EmissionMap);
+SAMPLER(sampler_EmissionMap);
+
+TEXTURE2D(_OcclusionMap);
+SAMPLER(sampler_OcclusionMap);
+
+TEXTURE2D(_MatCapMap);
+SAMPLER(sampler_MatCapMap);
+
+TEXTURE2D(_ToonRampMap);
+SAMPLER(sampler_ToonRampMap);
+
+TEXTURE2D(_FaceSDFMap);
+SAMPLER(sampler_FaceSDFMap);
+
 float4 SampleBaseMap(float2 uv)
 {
     return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
@@ -50,6 +129,11 @@ void DoAlphaClip(float alpha)
     {
         clip(alpha * _BaseColor.a - _Cutoff);
     }
+}
+
+float InvLerpClamp(float from, float to, float value)
+{
+    return saturate((value - from) / max(to - from, 0.0001));
 }
 
 float4 ApplyOutlineZOffset(float4 positionCS, float zOffset)

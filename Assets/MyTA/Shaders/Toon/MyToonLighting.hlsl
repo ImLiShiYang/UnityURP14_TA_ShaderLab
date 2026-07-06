@@ -1,0 +1,280 @@
+﻿#ifndef MY_TOON_LIGHTING_INCLUDED
+#define MY_TOON_LIGHTING_INCLUDED
+
+#include "Assets/MyTA/Shaders/Toon/MyToonShared.hlsl"
+
+float3 GetToonRampColor(float lightValue)
+{
+    if (_UseToonRamp < 0.5)
+        return 1.0;
+
+    float rampU = saturate((lightValue - 0.5) * _ToonRampContrast + 0.5 + _ToonRampOffset);
+
+    if (_ToonRampInvert > 0.5)
+        rampU = 1.0 - rampU;
+
+    return SAMPLE_TEXTURE2D(_ToonRampMap, sampler_ToonRampMap, float2(0.5, rampU)).rgb;
+}
+
+
+
+float3 ApplyHeightGradient(float3 color, float3 positionWS)
+{
+    if (_UseHeightGradient < 0.5)
+        return color;
+
+    float height01 = InvLerpClamp(_HeightGradientMin, _HeightGradientMax, positionWS.y);
+    float3 gradientColor = lerp(_HeightGradientBottomColor.rgb, _HeightGradientTopColor.rgb, height01);
+
+    return lerp(color, color * gradientColor, _HeightGradientStrength);
+}
+
+float GetOcclusion(float2 uv)
+{
+    float occlusion = 1.0;
+
+    if (_UseOcclusion > 0.5)
+    {
+        float4 occlusionMap = SAMPLE_TEXTURE2D(_OcclusionMap, sampler_OcclusionMap, uv);
+        float occlusionValue = dot(occlusionMap, _OcclusionMapChannelMask);
+        occlusionValue = lerp(1.0, occlusionValue, _OcclusionStrength);
+        occlusion = InvLerpClamp(_OcclusionRemapStart, _OcclusionRemapEnd, occlusionValue);
+    }
+
+    return occlusion;
+}
+
+float3 GetIndirectLight(float occlusion)
+{
+    float3 indirectLight = max(SampleSH(0), _IndirectLightMinColor.rgb);
+    indirectLight *= _IndirectLightMultiplier;
+    indirectLight *= lerp(1.0, occlusion, 0.5);
+    return indirectLight;
+}
+
+float GetToonLight(float ndotl, float occlusion)
+{
+    float toonLight = smoothstep(
+        _ShadowThreshold - _ShadowSoftness,
+        _ShadowThreshold + _ShadowSoftness,
+        ndotl
+    );
+
+    toonLight *= occlusion;
+    toonLight = lerp(toonLight, 1.0, _MainLightIgnoreCelShade);
+
+    return toonLight;
+}
+
+float GetSpecular(float3 normalWS, float3 lightDirWS, float3 viewDirWS)
+{
+    if (_UseSpecular < 0.5)
+        return 0.0;
+
+    float3 halfDirWS = normalize(lightDirWS + viewDirWS);
+    float specRaw = saturate(dot(normalWS, halfDirWS));
+
+    return smoothstep(
+        _SpecularThreshold,
+        _SpecularThreshold + max(_SpecularSoftness, 0.001),
+        specRaw
+    );
+}
+
+float3 ShiftHairTangent(float3 tangentWS, float3 normalWS, float shift)
+{
+    return normalize(tangentWS + normalWS * shift);
+}
+
+float GetHairStrandSpecular(float3 tangentWS, float3 lightDirWS, float3 viewDirWS, float power)
+{
+    float3 halfDirWS = normalize(lightDirWS + viewDirWS);
+
+    float tDotH = dot(tangentWS, halfDirWS);
+
+    // Kajiya-Kay 风格：高光出现在 H 与发丝方向接近垂直的位置。
+    float sinTH = sqrt(saturate(1.0 - tDotH * tDotH));
+
+    float rawSpec = pow(sinTH, max(power, 1.0));
+
+    // 方向衰减：0 = 两边都亮；1 = 根据切线方向做一点衰减。
+    // 如果你的模型 tangent 方向不稳定，建议保持 0。
+    float dirAtten = smoothstep(-1.0, 0.0, tDotH);
+    rawSpec *= lerp(1.0, dirAtten, _HairSpecularDirectionAtten);
+
+    return rawSpec;
+}
+
+float3 GetAnisotropicHairSpecular(
+    float3 normalWS,
+    float3 hairDirWS,
+    float3 lightDirWS,
+    float3 viewDirWS,
+    float lightAtten
+)
+{
+    if (_UseHairSpecular < 0.5)
+        return 0.0;
+
+    float3 result = 0.0;
+
+    float3 primaryTangentWS = ShiftHairTangent(hairDirWS, normalWS, _HairSpecularShift);
+
+    float primaryRaw = GetHairStrandSpecular(
+        primaryTangentWS,
+        lightDirWS,
+        viewDirWS,
+        _HairSpecularPower
+    );
+
+    float primaryToon = smoothstep(
+        _HairSpecularThreshold,
+        _HairSpecularThreshold + max(_HairSpecularSoftness, 0.001),
+        primaryRaw
+    );
+
+    result += _HairSpecularColor.rgb * primaryToon * _HairSpecularIntensity;
+
+    if (_UseHairSecondarySpecular > 0.5)
+    {
+        float3 secondaryTangentWS = ShiftHairTangent(hairDirWS, normalWS, _HairSecondarySpecularShift);
+
+        float secondaryRaw = GetHairStrandSpecular(
+            secondaryTangentWS,
+            lightDirWS,
+            viewDirWS,
+            _HairSecondarySpecularPower
+        );
+
+        float secondaryToon = smoothstep(
+            _HairSpecularThreshold,
+            _HairSpecularThreshold + max(_HairSpecularSoftness, 0.001),
+            secondaryRaw
+        );
+
+        result += _HairSecondarySpecularColor.rgb * secondaryToon * _HairSecondarySpecularIntensity;
+    }
+
+    return result * saturate(lightAtten);
+}
+
+float GetRim(float3 normalWS, float3 viewDirWS)
+{
+    float rimRaw = 1.0 - saturate(dot(normalWS, viewDirWS));
+
+    return smoothstep(
+        _RimThreshold,
+        _RimThreshold + max(_RimSoftness, 0.001),
+        rimRaw
+    );
+}
+
+float3 GetMatCap(float3 normalWS, float3 baseColor)
+{
+    if (_UseMatCap < 0.5)
+        return 0;
+
+    float3 normalVS = normalize(TransformWorldToViewDir(normalWS));
+    float2 matCapUV = normalVS.xy * 0.5 + 0.5;
+
+    float3 matCapColor = SAMPLE_TEXTURE2D(_MatCapMap, sampler_MatCapMap, matCapUV).rgb;
+    matCapColor *= _MatCapColor.rgb * _MatCapIntensity;
+    matCapColor = lerp(matCapColor, matCapColor * baseColor, _MatCapBlendBaseColor);
+
+    return matCapColor;
+}
+
+float3 GetEmission(float2 uv, float3 baseColor)
+{
+    if (_UseEmission < 0.5)
+        return 0;
+
+    float4 emissionMap = SAMPLE_TEXTURE2D(_EmissionMap, sampler_EmissionMap, uv);
+    float emissionMask = dot(emissionMap, _EmissionMapChannelMask);
+
+    float3 emissionColor = _EmissionColor.rgb * emissionMask;
+    emissionColor = lerp(emissionColor, emissionColor * baseColor, _EmissionMulByBaseColor);
+
+    return emissionColor;
+}
+
+float GetFaceSDFLight(float2 uv, float3 lightDirWS)
+{
+    if (_UseFaceSDF < 0.5 || _IsFace < 0.5)
+        return 1.0;
+
+    float4 faceSDFMap = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, uv);
+    float faceMask = faceSDFMap.g;
+
+    // 非脸部区域不走 SDF
+    if (faceMask <= 0.001)
+        return 1.0;
+
+    // 从 objectToWorld 矩阵里取模型自己的方向
+    float3 upWS      = normalize(unity_ObjectToWorld._m01_m11_m21);
+    float3 forwardWS = normalize(unity_ObjectToWorld._m02_m12_m22);
+    float3 rightWS   = normalize(unity_ObjectToWorld._m00_m10_m20);
+
+    // 只看水平面 XZ，不让光源上下角度影响脸部 SDF 阴影
+    float2 lightXZ = lightDirWS.xz;
+    float2 forwardXZ = forwardWS.xz;
+    float2 rightXZ = rightWS.xz;
+
+    lightXZ = normalize(lightXZ + forwardXZ * 0.0001);
+    forwardXZ = normalize(forwardXZ);
+    rightXZ = normalize(rightXZ);
+
+    // 参照 NoiRC256 的倒置处理
+    // 如果你确认模型永远是正常站立，也可以先改成 float isUpright = 1.0;
+    float isUpright = (upWS.y - lightDirWS.y) < 0.0 ? 1.0 : -1.0;
+
+    float frontDot = dot(forwardXZ, lightXZ) ;
+    float side = dot(rightXZ, lightXZ) ;
+
+    // NoiRC256：RdotL > 0 时用翻转贴图
+    float2 sdfUV = uv;
+    if (side > 0.0)
+        sdfUV.x = 1.0 - sdfUV.x;
+
+    faceSDFMap = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, sdfUV);
+
+    float ilm = faceSDFMap.r;
+    faceMask = faceSDFMap.g;
+    float noseMask = faceSDFMap.b;
+
+    if (_FaceSDFInvert > 0.5)
+        ilm = 1.0 - ilm;
+
+    // NoiRC256 核心映射：
+    // 光从正前方来：frontDot 接近 1，ctrl 接近 0
+    // 光从侧面来：frontDot 接近 0，ctrl 接近 0.5
+    // 光从背后方来：frontDot 接近 -1，ctrl 接近 1
+    float ctrl = -0.5 * frontDot + 0.5;
+
+    // 你的自定义偏移继续保留
+    ctrl = saturate(ctrl + _FaceSDFFrontOffset + _FaceSDFShadowThreshold);
+
+    // 原版是 step(ctrl, ilm)
+    // 为了保留你的柔边，用 smoothstep 做软过渡
+    float sdfLit = smoothstep(
+        ctrl - _FaceSDFShadowSoftness,
+        ctrl + _FaceSDFShadowSoftness,
+        ilm
+    );
+
+    float faceLight = lerp(
+        1.0 - _FaceSDFShadowStrength,
+        1.0,
+        sdfLit
+    );
+
+    // 鼻影建议先弱化，避免干扰主脸阴影调试
+    float noseShadow = noseMask * _FaceSDFShadowStrength;
+    float noseLight = 1.0 - noseShadow;
+
+    // faceLight = min(faceLight, noseLight);
+
+    return lerp(1.0, faceLight, saturate(faceMask));
+}
+
+#endif
