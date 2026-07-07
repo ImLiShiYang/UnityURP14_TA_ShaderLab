@@ -24,7 +24,7 @@ Shader "MySimpleToon"
         [Toggle]_UseFaceSDF ("启用脸部 SDF 阴影", Float) = 0
         [NoScaleOffset]_FaceSDFMap ("脸部 SDF 贴图", 2D) = "gray" {}
         _FaceSDFShadowThreshold ("脸部 SDF 阴影分界", Range(0, 1)) = 0.5
-        _FaceSDFShadowSoftness ("脸部 SDF 阴影柔和度", Range(0.001, 0.5)) = 0.08
+        _FaceSDFShadowSoftness ("脸部 SDF 阴影柔和度", Range(0.0001, 0.5)) = 0.08
         _FaceSDFShadowStrength ("脸部 SDF 阴影强度", Range(0, 1)) = 1
         _FaceSDFFrontOffset ("脸部受光偏移", Range(-1, 1)) = 0
         [Toggle]_FaceSDFInvert ("脸部 SDF 反向", Float) = 0
@@ -287,7 +287,7 @@ Shader "MySimpleToon"
 
                 if (_IsFace > 0.5 && _UseFaceSDF > 0.5)
                 {
-                    float faceSDFLight = GetFaceSDFLight(input.uv, lightDirWS);
+                    float faceSDFLight = GetFaceSDFLight(input.uv, normalWS,lightDirWS);
                     finalLight = faceSDFLight * shadowFactor * _DirectLightMultiplier;
                 }
                 
@@ -401,7 +401,7 @@ Shader "MySimpleToon"
 
                 if (_DebugMode == 9)
                 {
-                    float faceSDFLight = GetFaceSDFLight(input.uv, lightDirWS);
+                    float faceSDFLight = GetFaceSDFLight(input.uv, normalWS,lightDirWS);
                     return half4(faceSDFLight, faceSDFLight, faceSDFLight, 1);
                 }
 

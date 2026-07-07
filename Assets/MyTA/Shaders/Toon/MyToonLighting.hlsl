@@ -198,7 +198,28 @@ float3 GetEmission(float2 uv, float3 baseColor)
     return emissionColor;
 }
 
-float GetFaceSDFLight(float2 uv, float3 lightDirWS)
+float GetNormalToonLight(float3 normalWS, float3 lightDirWS)
+{
+    normalWS = normalize(normalWS);
+    lightDirWS = normalize(lightDirWS);
+
+    float ndl = saturate(dot(normalWS, lightDirWS));
+
+    // 这里先用你脸部 SDF 的软硬参数，避免再新增面板参数
+    float normalLit = smoothstep(
+        _FaceSDFShadowThreshold - _FaceSDFShadowSoftness,
+        _FaceSDFShadowThreshold + _FaceSDFShadowSoftness,
+        ndl
+    );
+
+    return lerp(
+        1.0 - _FaceSDFShadowStrength,
+        1.0,
+        normalLit
+    );
+}
+
+float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
 {
     if (_UseFaceSDF < 0.5 || _IsFace < 0.5)
         return 1.0;
@@ -206,9 +227,10 @@ float GetFaceSDFLight(float2 uv, float3 lightDirWS)
     float4 faceSDFMap = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, uv);
     float faceMask = faceSDFMap.g;
 
-    // 非脸部区域不走 SDF
+    // 非脸部 SDF 区域，比如耳朵，不要直接全亮
+    // 改为普通法线卡通阴影
     if (faceMask <= 0.001)
-        return 1.0;
+        return GetNormalToonLight(normalWS, lightDirWS);
 
     // 从 objectToWorld 矩阵里取模型自己的方向
     float3 upWS      = normalize(unity_ObjectToWorld._m01_m11_m21);
