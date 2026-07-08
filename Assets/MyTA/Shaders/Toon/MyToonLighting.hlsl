@@ -319,6 +319,69 @@ float GetNormalToonLight(float3 normalWS, float3 lightDirWS)
     );
 }
 
+float GetFringeShadowMask(
+    float4 positionCS,
+    float4 positionSS,
+    float posNDCw,
+    float3 lightDirWS
+)
+{
+    if (_UseFringeShadow < 0.5 || _IsFace < 0.5)
+        return 0.0;
+
+    float2 screenUV = positionSS.xy / max(positionSS.w, 0.0001);
+
+    float rawDepth = positionCS.z;
+    float faceEyeDepth = LinearEyeDepth(rawDepth, _ZBufferParams);
+
+    float3 viewLightDir = normalize(TransformWorldToViewDir(lightDirWS));
+
+    // 屏幕空间偏移方向。这里保留 xy 长度：
+    // 光越接近正对摄像机，xy 越小，刘海投影偏移也越小。
+    float2 offsetDir = viewLightDir.xy;
+
+    // 近距离修正，参考原项目的 NDC.w 思路。
+    float nearFix = 1.0 / max(min(posNDCw, 1.0), 0.0001);
+
+    // 远处淡出，避免角色离镜头太远时阴影飘得很夸张。
+    float farFade = min(1.0, _FringeShadowCameraFadeDistance / max(faceEyeDepth, 0.0001));
+
+    float2 sampleUV = screenUV + offsetDir * _FringeShadowDistance * nearFix * farFade;
+
+    if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0)
+        return 0.0;
+
+    float hairRawDepth = SAMPLE_TEXTURE2D(
+        _MyToonFringeShadowTex,
+        sampler_MyToonFringeShadowTex,
+        sampleUV
+    ).g;
+
+    // 黑色清屏区域没有头发。
+    float hasHair = step(0.000001, hairRawDepth);
+
+    float hairEyeDepth = LinearEyeDepth(hairRawDepth, _ZBufferParams);
+
+    // hairEyeDepth 比 faceEyeDepth 小，说明头发更靠近摄像机，可能挡住脸。
+    float depthPass = step(hairEyeDepth - _FringeShadowDepthBias, faceEyeDepth);
+
+    return hasHair * depthPass;
+}
+
+float GetFringeShadow(
+    float4 positionCS,
+    float4 positionSS,
+    float posNDCw,
+    float3 lightDirWS
+)
+{
+    float shadowMask = GetFringeShadowMask(positionCS, positionSS, posNDCw, lightDirWS);
+
+    // 返回值：1 = 不受刘海影响；越小 = 越暗。
+    return lerp(1.0, 1.0 - _FringeShadowStrength, shadowMask);
+}
+
+
 float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
 {
     if (_UseFaceSDF < 0.5 || _IsFace < 0.5)

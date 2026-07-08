@@ -31,6 +31,14 @@ float _FaceSDFShadowStrength;
 float _FaceSDFFrontOffset;
 float _FaceSDFInvert;
 
+float _UseFringeShadow;
+float _IsFringeShadowCaster;
+float _FringeShadowDistance;
+float _FringeShadowStrength;
+float _FringeShadowDepthBias;
+float _FringeShadowColorStrength;
+float _FringeShadowCameraFadeDistance;
+
 float _UseToonRamp;
 float _ToonRampStrength;
 float _ToonRampOffset;
@@ -99,6 +107,8 @@ float _UseOutline;
 float4 _OutlineColor;
 float _OutlineWidth;
 float _OutlineZOffset;
+float _OutlineZOffsetMaskRemapStart;
+float _OutlineZOffsetMaskRemapEnd;
 
 float4 _RimColor;
 float _RimIntensity;
@@ -127,6 +137,13 @@ SAMPLER(sampler_HairSpecularShiftMap);
 TEXTURE2D(_HairSpecularMaskMap);
 SAMPLER(sampler_HairSpecularMaskMap);
 
+TEXTURE2D(_OutlineZOffsetMaskTex);
+SAMPLER(sampler_OutlineZOffsetMaskTex);
+
+TEXTURE2D(_MyToonFringeShadowTex);
+SAMPLER(sampler_MyToonFringeShadowTex);
+
+
 float4 SampleBaseMap(float2 uv)
 {
     return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
@@ -147,14 +164,25 @@ float InvLerpClamp(float from, float to, float value)
 
 float4 ApplyOutlineZOffset(float4 positionCS, float zOffset)
 {
-
-    #if UNITY_REVERSED_Z
-    positionCS.z -= zOffset * positionCS.w;
-    #else
-    positionCS.z += zOffset * positionCS.w;
-    #endif
-
+    if (unity_OrthoParams.w == 0)
+    {
+        float2 projZ = UNITY_MATRIX_P[2].zw;
+        float modifiedPositionVSZ = -positionCS.w - zOffset;
+        float modifiedPositionCSZ = modifiedPositionVSZ * projZ.x + projZ.y;
+        positionCS.z = modifiedPositionCSZ * positionCS.w / -modifiedPositionVSZ;
+    }
+    else
+    {
+        positionCS.z -= zOffset / _ProjectionParams.z;
+    }
     return positionCS;
+}
+
+float GetOutlineZOffsetMask(float2 uv)
+{
+    float mask = SAMPLE_TEXTURE2D_LOD(_OutlineZOffsetMaskTex, sampler_OutlineZOffsetMaskTex, uv, 0).r;
+    mask = 1.0 - mask;
+    return InvLerpClamp(_OutlineZOffsetMaskRemapStart, _OutlineZOffsetMaskRemapEnd, mask);
 }
 
 // 根据投影矩阵反推出当前摄像机的垂直 FOV，单位是角度。
