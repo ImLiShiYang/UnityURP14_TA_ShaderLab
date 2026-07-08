@@ -63,6 +63,9 @@ float _SpecularSoftness;
 
 float _UseHairSpecular;
 float _HairSpecularUseBitangent;
+float _HairSpecularShiftMapStrength;
+float _HairSpecularMaskStrength;
+float _HairSpecularMaskPower;
 float4 _HairSpecularColor;
 float _HairSpecularIntensity;
 float _HairSpecularPower;
@@ -117,6 +120,12 @@ SAMPLER(sampler_ToonRampMap);
 
 TEXTURE2D(_FaceSDFMap);
 SAMPLER(sampler_FaceSDFMap);
+
+TEXTURE2D(_HairSpecularShiftMap);
+SAMPLER(sampler_HairSpecularShiftMap);
+
+TEXTURE2D(_HairSpecularMaskMap);
+SAMPLER(sampler_HairSpecularMaskMap);
 
 float4 SampleBaseMap(float2 uv)
 {

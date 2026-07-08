@@ -70,6 +70,12 @@ Shader "MySimpleToon"
         
         [Header(Anisotropic Hair Specular)]
         [Toggle]_UseHairSpecular ("启用头发各向异性高光", Float) = 0
+        [NoScaleOffset]_HairSpecularShiftMap ("头发高光偏移贴图", 2D) = "gray" {}
+        _HairSpecularShiftMapStrength ("头发高光偏移贴图强度", Range(0, 1)) = 0.15
+
+        [NoScaleOffset]_HairSpecularMaskMap ("头发高光遮罩贴图", 2D) = "white" {}
+        _HairSpecularMaskStrength ("头发高光遮罩强度", Range(0, 1)) = 1
+        _HairSpecularMaskPower ("头发高光遮罩对比度", Range(0.2, 4)) = 1
         [Toggle]_HairSpecularUseBitangent ("使用副切线作为发丝方向", Float) = 1
         _HairSpecularColor ("头发主高光颜色", Color) = (1, 1, 1, 1)
         _HairSpecularIntensity ("头发主高光强度", Range(0, 5)) = 1.0
@@ -334,7 +340,8 @@ Shader "MySimpleToon"
                 // bitangentWS 是副切线。很多头发卡片的“发丝方向”更接近 UV 的 V 方向，所以默认用 bitangent。
                 float3 tangentWS = normalize(input.tangentWS.xyz);
                 float3 bitangentWS = normalize(cross(normalWS, tangentWS) * input.tangentWS.w);
-                float3 hairDirWS = (_HairSpecularUseBitangent > 0.5) ? bitangentWS : tangentWS;
+                float3 uvVHairDirWS = GetUvVHairDirectionWS(input.positionWS, input.uv, normalWS, bitangentWS);
+                float3 hairDirWS = (_HairSpecularUseBitangent > 0.5) ? uvVHairDirWS : tangentWS;
 
                 // 只乘 shadowFactor，不乘 toonLight。
                 // 这样头发高光不会被普通明暗分界切得太死，但仍然会受实时阴影影响。
@@ -345,7 +352,8 @@ Shader "MySimpleToon"
                     hairDirWS,
                     lightDirWS,
                     viewDirWS,
-                    hairSpecularLightAtten
+                    hairSpecularLightAtten,
+                    input.uv
                 );
 
                 float hairSpecularDebug = max(max(hairSpecularColor.r, hairSpecularColor.g), hairSpecularColor.b);

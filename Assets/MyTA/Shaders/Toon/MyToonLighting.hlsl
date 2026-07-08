@@ -86,19 +86,55 @@ float3 ShiftHairTangent(float3 tangentWS, float3 normalWS, float shift)
     return normalize(tangentWS + normalWS * shift);
 }
 
-float GetHairStrandSpecular(float3 tangentWS, float3 lightDirWS, float3 viewDirWS, float power)
+float3 GetUvVHairDirectionWS(float3 positionWS, float2 uv, float3 normalWS, float3 fallbackDirWS)
 {
+    float3 dpdx = ddx(positionWS);
+    float3 dpdy = ddy(positionWS);
+    float2 duvdx = ddx(uv);
+    float2 duvdy = ddy(uv);
+
+    float det = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+    float3 uvVDirWS = (duvdx.x * dpdy - duvdy.x * dpdx) / max(abs(det), 1e-5);
+    uvVDirWS = uvVDirWS - normalWS * dot(uvVDirWS, normalWS);
+
+    float uvVLenSq = dot(uvVDirWS, uvVDirWS);
+    return (abs(det) > 1e-5 && uvVLenSq > 1e-6) ? (uvVDirWS * rsqrt(uvVLenSq)) : fallbackDirWS;
+}
+
+float GetHairStrandSpecular(
+    float3 normalWS,
+    float3 tangentWS,
+    float3 lightDirWS,
+    float3 viewDirWS,
+    float power
+)
+{
+    normalWS = normalize(normalWS);
+    tangentWS = normalize(tangentWS);
+    lightDirWS = normalize(lightDirWS);
+    viewDirWS = normalize(viewDirWS);
+
     float3 halfDirWS = normalize(lightDirWS + viewDirWS);
 
     float tDotH = dot(tangentWS, halfDirWS);
 
-    // Kajiya-Kay 风格：高光出现在 H 与发丝方向接近垂直的位置。
+    // Kajiya-Kay：H 和发丝方向越接近垂直，高光越强
     float sinTH = sqrt(saturate(1.0 - tDotH * tDotH));
 
-    float rawSpec = pow(sinTH, max(power, 1.0));
+    float rawSpec = pow(saturate(sinTH), max(power, 1.0));
 
-    // 方向衰减：0 = 两边都亮；1 = 根据切线方向做一点衰减。
-    // 如果你的模型 tangent 方向不稳定，建议保持 0。
+    // 限制背光面乱亮
+    float ndl = saturate(dot(normalWS, lightDirWS));
+    float lightMask = smoothstep(0.05, 0.45, ndl);
+
+    // 限制掠射角碎亮
+    float ndv = saturate(dot(normalWS, viewDirWS));
+    float viewMask = smoothstep(0.12, 0.55, ndv);
+
+    rawSpec *= lightMask;
+    rawSpec *= viewMask;
+
+    // 方向衰减。你的模型 tangent 方向不一定稳定，建议参数先保持 0。
     float dirAtten = smoothstep(-1.0, 0.0, tDotH);
     rawSpec *= lerp(1.0, dirAtten, _HairSpecularDirectionAtten);
 
@@ -110,17 +146,62 @@ float3 GetAnisotropicHairSpecular(
     float3 hairDirWS,
     float3 lightDirWS,
     float3 viewDirWS,
-    float lightAtten
+    float lightAtten,
+    float2 uv
 )
 {
     if (_UseHairSpecular < 0.5)
         return 0.0;
 
+    normalWS = normalize(normalWS);
+    hairDirWS = normalize(hairDirWS);
+    lightDirWS = normalize(lightDirWS);
+    viewDirWS = normalize(viewDirWS);
+
     float3 result = 0.0;
 
-    float3 primaryTangentWS = ShiftHairTangent(hairDirWS, normalWS, _HairSpecularShift);
+    // -----------------------------
+    // 1. Shift Map：控制高光位置偏移
+    // gray 0.5 = 不偏移
+    // 小于 0.5 = 负向偏移
+    // 大于 0.5 = 正向偏移
+    // -----------------------------
+    float shiftTex = SAMPLE_TEXTURE2D(
+        _HairSpecularShiftMap,
+        sampler_HairSpecularShiftMap,
+        uv
+    ).r - 0.5;
+
+    float primaryShift = _HairSpecularShift + shiftTex * _HairSpecularShiftMapStrength;
+    float secondaryShift = _HairSecondarySpecularShift + shiftTex * _HairSpecularShiftMapStrength;
+
+    // -----------------------------
+    // 2. Spec Mask：控制哪里允许出现动态高光
+    // 黑 = 无高光
+    // 灰 = 弱高光
+    // 白 = 强高光
+    // -----------------------------
+    float hairSpecMask = SAMPLE_TEXTURE2D(
+        _HairSpecularMaskMap,
+        sampler_HairSpecularMaskMap,
+        uv
+    ).r;
+
+    hairSpecMask = saturate(hairSpecMask);
+    hairSpecMask = pow(hairSpecMask, max(_HairSpecularMaskPower, 0.001));
+    hairSpecMask = lerp(1.0, hairSpecMask, _HairSpecularMaskStrength);
+
+    // -----------------------------
+    // 3. 主高光
+    // -----------------------------
+    float3 primaryTangentWS = ShiftHairTangent(
+        hairDirWS,
+        normalWS,
+        primaryShift
+    );
 
     float primaryRaw = GetHairStrandSpecular(
+        normalWS,
         primaryTangentWS,
         lightDirWS,
         viewDirWS,
@@ -133,13 +214,24 @@ float3 GetAnisotropicHairSpecular(
         primaryRaw
     );
 
-    result += _HairSpecularColor.rgb * primaryToon * _HairSpecularIntensity;
+    result += _HairSpecularColor.rgb
+            * primaryToon
+            * _HairSpecularIntensity;
 
+    // -----------------------------
+    // 4. 副高光
+    // 第一版建议先关掉，等主高光稳定后再开
+    // -----------------------------
     if (_UseHairSecondarySpecular > 0.5)
     {
-        float3 secondaryTangentWS = ShiftHairTangent(hairDirWS, normalWS, _HairSecondarySpecularShift);
+        float3 secondaryTangentWS = ShiftHairTangent(
+            hairDirWS,
+            normalWS,
+            secondaryShift
+        );
 
         float secondaryRaw = GetHairStrandSpecular(
+            normalWS,
             secondaryTangentWS,
             lightDirWS,
             viewDirWS,
@@ -152,10 +244,18 @@ float3 GetAnisotropicHairSpecular(
             secondaryRaw
         );
 
-        result += _HairSecondarySpecularColor.rgb * secondaryToon * _HairSecondarySpecularIntensity;
+        result += _HairSecondarySpecularColor.rgb
+                * secondaryToon
+                * _HairSecondarySpecularIntensity;
     }
 
-    return result * saturate(lightAtten);
+    // -----------------------------
+    // 5. 最终遮罩和光照衰减
+    // -----------------------------
+    result *= hairSpecMask;
+    result *= saturate(lightAtten);
+
+    return result;
 }
 
 float GetRim(float3 normalWS, float3 viewDirWS)
