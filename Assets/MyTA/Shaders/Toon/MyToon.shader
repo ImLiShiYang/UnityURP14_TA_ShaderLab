@@ -27,6 +27,7 @@
         _FaceSDFShadowSoftness ("脸部 SDF 阴影柔和度", Range(0.0001, 0.5)) = 0.08
         _FaceSDFShadowStrength ("脸部 SDF 阴影强度", Range(0, 1)) = 1
         _FaceSDFFrontOffset ("脸部受光偏移", Range(-1, 1)) = 0
+        _FaceSDFSideSwitchSoftness ("脸部 SDF 左右切换柔和度", Range(0.0001, 0.5)) = 0.08
         [Toggle]_FaceSDFInvert ("脸部 SDF 反向", Float) = 0
 
         [Header(Fringe Shadow)]

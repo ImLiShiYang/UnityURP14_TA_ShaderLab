@@ -29,6 +29,7 @@ float _FaceSDFShadowThreshold;
 float _FaceSDFShadowSoftness;
 float _FaceSDFShadowStrength;
 float _FaceSDFFrontOffset;
+float _FaceSDFSideSwitchSoftness;
 float _FaceSDFInvert;
 
 float _UseFringeShadow;

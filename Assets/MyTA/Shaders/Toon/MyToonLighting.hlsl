@@ -387,13 +387,10 @@ float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
     if (_UseFaceSDF < 0.5 || _IsFace < 0.5)
         return 1.0;
 
-    float4 faceSDFMap = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, uv);
-    float faceMask = faceSDFMap.g;
-
     // 非脸部 SDF 区域，比如耳朵，不要直接全亮
     // 改为普通法线卡通阴影
-    if (faceMask <= 0.001)
-        return GetNormalToonLight(normalWS, lightDirWS);
+    // if (faceMask <= 0.001)
+    //     return GetNormalToonLight(normalWS, lightDirWS);
 
     // 从 objectToWorld 矩阵里取模型自己的方向
     float3 upWS      = normalize(unity_ObjectToWorld._m01_m11_m21);
@@ -416,16 +413,17 @@ float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
     float frontDot = dot(forwardXZ, lightXZ) ;
     float side = dot(rightXZ, lightXZ) ;
 
-    // NoiRC256：RdotL > 0 时用翻转贴图
-    float2 sdfUV = uv;
-    if (side > 0.0)
-        sdfUV.x = 1.0 - sdfUV.x;
-
-    faceSDFMap = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, sdfUV);
-
-    float ilm = faceSDFMap.r;
-    faceMask = faceSDFMap.g;
-    float noseMask = faceSDFMap.b;
+    // 光线接近正前方时，side 会在 0 附近来回跨越。
+    // 硬切镜像 UV 会让鼻影瞬间跳边，所以在 0 附近混合左右两次采样。
+    float2 flippedSdfUV = float2(1.0 - uv.x, uv.y);
+    float ilmOriginal = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, uv).r;
+    float ilmFlipped = SAMPLE_TEXTURE2D(_FaceSDFMap, sampler_FaceSDFMap, flippedSdfUV).r;
+    float sideSwitch = smoothstep(
+        -_FaceSDFSideSwitchSoftness,
+        _FaceSDFSideSwitchSoftness,
+        side
+    );
+    float ilm = lerp(ilmOriginal, ilmFlipped, sideSwitch);
 
     if (_FaceSDFInvert > 0.5)
         ilm = 1.0 - ilm;
@@ -446,6 +444,10 @@ float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
         ctrl + _FaceSDFShadowSoftness,
         ilm
     );
+    
+    // 光源接近脸背后时，强制把脸部 SDF 压暗
+    float backLightFade = smoothstep(-0.65, -0.55, frontDot);
+    sdfLit *= backLightFade;
 
     float faceLight = lerp(
         1.0 - _FaceSDFShadowStrength,
@@ -453,13 +455,8 @@ float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
         sdfLit
     );
 
-    // 鼻影建议先弱化，避免干扰主脸阴影调试
-    float noseShadow = noseMask * _FaceSDFShadowStrength;
-    float noseLight = 1.0 - noseShadow;
-
-    // faceLight = min(faceLight, noseLight);
-
-    return lerp(1.0, faceLight, saturate(faceMask));
+    
+    return faceLight;
 }
 
 #endif
