@@ -18,6 +18,9 @@ public class TAAssetCheckerWindow : EditorWindow
     private ScanScope lastScanScope = ScanScope.Textures;
     private UnusedAssetTypeFilter unusedAssetTypeFilter = UnusedAssetTypeFilter.All;
     
+    // 当前选择的细分规则
+    private RuleDetailFilter ruleDetailFilter = RuleDetailFilter.All;
+    
     private bool allowMaterialShaderDefaultQueue = true;
     private int minMaterialRenderQueue = 2000;
     private int maxMaterialRenderQueue = 3000;
@@ -38,6 +41,33 @@ public class TAAssetCheckerWindow : EditorWindow
         Prefabs,
         Unused,
         All
+    }
+    
+    private enum RuleDetailFilter
+    {
+        All,
+
+        // 贴图
+        TextureSize,
+        TextureMipMap,
+        TextureName,
+
+        // 材质
+        MaterialName,
+        MaterialShader,
+        MaterialRenderQueue,
+        MaterialNormalMap,
+
+        // 模型
+        ModelVertexCount,
+        ModelName,
+
+        // Prefab
+        PrefabMissingScript,
+        PrefabName,
+
+        // 未使用资产
+        UnusedAsset
     }
     
     private enum UnusedAssetTypeFilter
@@ -252,30 +282,336 @@ public class TAAssetCheckerWindow : EditorWindow
 
     private void DrawFilter()
     {
-        resultFilter = (ResultFilter)EditorGUILayout.EnumPopup("显示结果", resultFilter);
+        resultFilter = (ResultFilter)EditorGUILayout.EnumPopup(
+            "显示结果",
+            resultFilter
+        );
+
+        EditorGUILayout.Space(6);
+
+        // 普通扫描显示规则细分类。
+        // 未使用资产已经有材质、纹理、预制体分类，因此不重复显示。
+        if (lastScanScope != ScanScope.Unused)
+        {
+            DrawRuleDetailFilter();
+        }
 
         if (lastScanScope == ScanScope.Unused)
         {
             EditorGUILayout.Space(4);
 
-            EditorGUILayout.LabelField("未使用资产分类", EditorStyles.boldLabel);
-
-            unusedAssetTypeFilter = (UnusedAssetTypeFilter)GUILayout.Toolbar(
-                (int)unusedAssetTypeFilter,
-                new string[]
-                {
-                    "全部",
-                    "材质",
-                    "纹理",
-                    "预制体"
-                },
-                GUILayout.Height(24)
+            EditorGUILayout.LabelField(
+                "未使用资产分类",
+                EditorStyles.boldLabel
             );
+
+            unusedAssetTypeFilter =
+                (UnusedAssetTypeFilter)GUILayout.Toolbar(
+                    (int)unusedAssetTypeFilter,
+                    new string[]
+                    {
+                        "全部",
+                        "材质",
+                        "纹理",
+                        "预制体"
+                    },
+                    GUILayout.Height(24)
+                );
 
             DrawUnusedAssetTypeSummary();
         }
 
         EditorGUILayout.Space(8);
+    }
+    
+    private void DrawRuleDetailFilter()
+    {
+        EditorGUILayout.LabelField(
+            "检测规则分类",
+            EditorStyles.boldLabel
+        );
+
+        RuleDetailFilter[] options = GetCurrentRuleFilterOptions();
+
+        int selectedIndex =
+            System.Array.IndexOf(options, ruleDetailFilter);
+
+        // 切换了扫描类型后，旧分类可能不属于当前类型。
+        if (selectedIndex < 0)
+        {
+            ruleDetailFilter = RuleDetailFilter.All;
+            selectedIndex = 0;
+        }
+
+        string[] labels = new string[options.Length];
+
+        for (int i = 0; i < options.Length; i++)
+        {
+            RuleDetailFilter option = options[i];
+
+            int count = GetRuleFilterResultCount(option);
+
+            labels[i] =
+                $"{GetRuleFilterDisplayName(option)} ({count})";
+        }
+
+        // 每行最多显示 4 个分类按钮
+        int columnCount = Mathf.Min(options.Length, 4);
+
+        int newIndex = GUILayout.SelectionGrid(
+            selectedIndex,
+            labels,
+            columnCount
+        );
+
+        if (newIndex >= 0 && newIndex < options.Length)
+        {
+            ruleDetailFilter = options[newIndex];
+        }
+    }
+    
+    private RuleDetailFilter[] GetCurrentRuleFilterOptions()
+    {
+        switch (lastScanScope)
+        {
+            case ScanScope.Textures:
+                return new RuleDetailFilter[]
+                {
+                    RuleDetailFilter.All,
+                    RuleDetailFilter.TextureSize,
+                    RuleDetailFilter.TextureMipMap,
+                    RuleDetailFilter.TextureName
+                };
+
+            case ScanScope.Materials:
+                return new RuleDetailFilter[]
+                {
+                    RuleDetailFilter.All,
+                    RuleDetailFilter.MaterialName,
+                    RuleDetailFilter.MaterialShader,
+                    RuleDetailFilter.MaterialRenderQueue,
+                    RuleDetailFilter.MaterialNormalMap
+                };
+
+            case ScanScope.Models:
+                return new RuleDetailFilter[]
+                {
+                    RuleDetailFilter.All,
+                    RuleDetailFilter.ModelVertexCount,
+                    RuleDetailFilter.ModelName
+                };
+
+            case ScanScope.Prefabs:
+                return new RuleDetailFilter[]
+                {
+                    RuleDetailFilter.All,
+                    RuleDetailFilter.PrefabMissingScript,
+                    RuleDetailFilter.PrefabName
+                };
+
+            case ScanScope.All:
+                return new RuleDetailFilter[]
+                {
+                    RuleDetailFilter.All,
+
+                    RuleDetailFilter.TextureSize,
+                    RuleDetailFilter.TextureMipMap,
+                    RuleDetailFilter.TextureName,
+
+                    RuleDetailFilter.MaterialName,
+                    RuleDetailFilter.MaterialShader,
+                    RuleDetailFilter.MaterialRenderQueue,
+                    RuleDetailFilter.MaterialNormalMap,
+
+                    RuleDetailFilter.ModelVertexCount,
+                    RuleDetailFilter.ModelName,
+
+                    RuleDetailFilter.PrefabMissingScript,
+                    RuleDetailFilter.PrefabName
+                };
+
+            default:
+                return new RuleDetailFilter[]
+                {
+                    RuleDetailFilter.All
+                };
+        }
+    }
+    
+    private string GetRuleFilterDisplayName(
+        RuleDetailFilter filter)
+    {
+        switch (filter)
+        {
+            case RuleDetailFilter.All:
+                return "全部";
+
+            case RuleDetailFilter.TextureSize:
+                return "贴图尺寸";
+
+            case RuleDetailFilter.TextureMipMap:
+                return "贴图 MipMap";
+
+            case RuleDetailFilter.TextureName:
+                return "贴图命名";
+
+            case RuleDetailFilter.MaterialName:
+                return "材质命名";
+
+            case RuleDetailFilter.MaterialShader:
+                return "材质 Shader";
+
+            case RuleDetailFilter.MaterialRenderQueue:
+                return "Render Queue";
+
+            case RuleDetailFilter.MaterialNormalMap:
+                return "法线贴图";
+
+            case RuleDetailFilter.ModelVertexCount:
+                return "模型顶点数";
+
+            case RuleDetailFilter.ModelName:
+                return "模型命名";
+
+            case RuleDetailFilter.PrefabMissingScript:
+                return "Missing Script";
+
+            case RuleDetailFilter.PrefabName:
+                return "Prefab 命名";
+
+            case RuleDetailFilter.UnusedAsset:
+                return "未使用资产";
+
+            default:
+                return filter.ToString();
+        }
+    }
+    
+    private int GetRuleFilterResultCount(
+        RuleDetailFilter filter)
+    {
+        int count = 0;
+
+        foreach (CheckResult result in results)
+        {
+            if (!ShouldShowByResultState(result))
+                continue;
+
+            if (DoesResultMatchRuleFilter(result, filter))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+    
+    private bool ShouldShowByResultState(CheckResult result)
+    {
+        switch (resultFilter)
+        {
+            case ResultFilter.All:
+                return true;
+
+            case ResultFilter.Failed:
+                return !result.passed;
+
+            case ResultFilter.Passed:
+                return result.passed;
+
+            default:
+                return true;
+        }
+    }
+    
+    private bool DoesResultMatchRuleFilter(
+        CheckResult result,
+        RuleDetailFilter filter)
+    {
+        RuleDetailFilter oldFilter = ruleDetailFilter;
+
+        ruleDetailFilter = filter;
+
+        bool matches = ShouldShowRuleDetail(result);
+
+        ruleDetailFilter = oldFilter;
+
+        return matches;
+    }
+    
+    private bool ShouldShowRuleDetail(CheckResult result)
+    {
+        if (result == null)
+            return false;
+
+        switch (ruleDetailFilter)
+        {
+            case RuleDetailFilter.All:
+                return true;
+
+            // =========================
+            // Texture
+            // =========================
+
+            case RuleDetailFilter.TextureSize:
+                return result.rule is TextureMaxSizeRule;
+
+            case RuleDetailFilter.TextureMipMap:
+                return result.rule is TextureMipMapRule;
+
+            case RuleDetailFilter.TextureName:
+                return result.rule is AssetNamePrefixRule
+                       && result.assetType == "Texture2D";
+
+            // =========================
+            // Material
+            // =========================
+
+            case RuleDetailFilter.MaterialName:
+                return result.rule is AssetNamePrefixRule
+                       && result.assetType == "Material";
+
+            case RuleDetailFilter.MaterialShader:
+                return result.rule is MaterialShaderRule;
+
+            case RuleDetailFilter.MaterialRenderQueue:
+                return result.rule is MaterialRenderQueueRule;
+
+            case RuleDetailFilter.MaterialNormalMap:
+                return result.rule is MaterialNormalMapRule;
+
+            // =========================
+            // Model
+            // =========================
+
+            case RuleDetailFilter.ModelVertexCount:
+                return result.rule is ModelVertexCountRule;
+
+            case RuleDetailFilter.ModelName:
+                return result.rule is AssetNamePrefixRule
+                       && result.assetType == "Model";
+
+            // =========================
+            // Prefab
+            // =========================
+
+            case RuleDetailFilter.PrefabMissingScript:
+                return result.rule is PrefabMissingScriptRule;
+
+            case RuleDetailFilter.PrefabName:
+                return result.rule is AssetNamePrefixRule
+                       && result.assetType == "Prefab";
+
+            // =========================
+            // Unused
+            // =========================
+
+            case RuleDetailFilter.UnusedAsset:
+                return result.rule is UnusedAssetRule;
+
+            default:
+                return true;
+        }
     }
     
     private void DrawUnusedAssetTypeSummary()
@@ -570,6 +906,7 @@ public class TAAssetCheckerWindow : EditorWindow
     private void ScanTextures()
     {
         lastScanScope = ScanScope.Textures;
+        ruleDetailFilter = RuleDetailFilter.All;
 
         results.Clear();
 
@@ -582,6 +919,7 @@ public class TAAssetCheckerWindow : EditorWindow
     private void ScanMaterials()
     {
         lastScanScope = ScanScope.Materials;
+        ruleDetailFilter = RuleDetailFilter.All;
 
         results.Clear();
 
@@ -594,6 +932,7 @@ public class TAAssetCheckerWindow : EditorWindow
     private void ScanModels()
     {
         lastScanScope = ScanScope.Models;
+        ruleDetailFilter = RuleDetailFilter.All;
 
         results.Clear();
 
@@ -606,6 +945,7 @@ public class TAAssetCheckerWindow : EditorWindow
     private void ScanPrefabs()
     {
         lastScanScope = ScanScope.Prefabs;
+        ruleDetailFilter = RuleDetailFilter.All;
 
         results.Clear();
 
@@ -618,6 +958,7 @@ public class TAAssetCheckerWindow : EditorWindow
     private void ScanAll()
     {
         lastScanScope = ScanScope.All;
+        ruleDetailFilter = RuleDetailFilter.All;
 
         results.Clear();
 
@@ -1499,30 +1840,15 @@ public class TAAssetCheckerWindow : EditorWindow
 
     private bool ShouldShowResult(CheckResult result)
     {
-        bool showByPassState;
-
-        switch (resultFilter)
-        {
-            case ResultFilter.All:
-                showByPassState = true;
-                break;
-
-            case ResultFilter.Failed:
-                showByPassState = !result.passed;
-                break;
-
-            case ResultFilter.Passed:
-                showByPassState = result.passed;
-                break;
-
-            default:
-                showByPassState = true;
-                break;
-        }
-
-        if (!showByPassState)
+        // 第一层：通过 / 失败 / 全部
+        if (!ShouldShowByResultState(result))
             return false;
 
+        // 第二层：命名、Shader、队列、尺寸等规则分类
+        if (!ShouldShowRuleDetail(result))
+            return false;
+
+        // 第三层：未使用资产的材质、纹理、Prefab 分类
         if (lastScanScope == ScanScope.Unused)
         {
             return ShouldShowUnusedAssetType(result);

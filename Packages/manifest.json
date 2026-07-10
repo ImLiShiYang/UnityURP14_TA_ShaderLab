@@ -1,5 +1,8 @@
 {
   "dependencies": {
+    "com.ivanmurzak.unity.mcp": "0.82.4",
+    "com.ivanmurzak.unity.mcp.particlesystem": "1.2.24",
+    "com.ivanmurzak.unity.mcp.probuilder": "1.2.24",
     "com.unity.burst": "1.8.26",
     "com.unity.cinemachine": "2.10.3",
     "com.unity.collab-proxy": "2.12.4",
@@ -53,5 +56,15 @@
     "com.unity.modules.vr": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0"
-  }
+  },
+  "scopedRegistries": [
+    {
+      "name": "package.openupm.com",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.ivanmurzak",
+        "extensions.unity"
+      ]
+    }
+  ]
 }
