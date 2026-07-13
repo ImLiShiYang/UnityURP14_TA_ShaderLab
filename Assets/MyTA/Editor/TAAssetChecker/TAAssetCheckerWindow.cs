@@ -18,8 +18,18 @@ public class TAAssetCheckerWindow : EditorWindow
     private ScanScope lastScanScope = ScanScope.Textures;
     private UnusedAssetTypeFilter unusedAssetTypeFilter = UnusedAssetTypeFilter.All;
     
+    // 扫描按钮被选中后显示的颜色
+    private static readonly Color SelectedScanButtonColor =
+        new Color(0.25f, 0.50f, 0.85f, 1.0f);
+    
     // 当前选择的细分规则
     private RuleDetailFilter ruleDetailFilter = RuleDetailFilter.All;
+    
+    // 缓存上一次生成的项目引用索引
+    private AssetReferenceIndex cachedReferenceIndex;
+
+    // 记录建立缓存时的 AssetDatabase 版本
+    private uint cachedReferenceVersion = uint.MaxValue;
     
     private bool allowMaterialShaderDefaultQueue = true;
     private int minMaterialRenderQueue = 2000;
@@ -101,11 +111,7 @@ public class TAAssetCheckerWindow : EditorWindow
         EditorGUILayout.Space(8);
 
         EditorGUILayout.LabelField("TA Asset Checker", EditorStyles.boldLabel);
-
-        EditorGUILayout.HelpBox(
-            "当前版本：V0.6\n功能：支持贴图检测和模型顶点数检测。",
-            MessageType.Info
-        );
+        
 
         EditorGUILayout.Space(8);
     }
@@ -183,31 +189,57 @@ public class TAAssetCheckerWindow : EditorWindow
         EditorGUILayout.Space(8);
     }
 
+    /// <summary>
+    /// 绘制扫描按钮。
+    /// 当前按钮对应最近一次扫描类型时，持续显示蓝色。
+    /// </summary>
+    private bool DrawScanButton(string buttonName, ScanScope buttonScope)
+    {
+        // 保存原来的按钮背景颜色，避免影响后面的按钮
+        Color oldBackgroundColor = GUI.backgroundColor;
+
+        // 当前按钮是最近一次点击的扫描类型时，显示选中颜色
+        if (lastScanScope == buttonScope)
+        {
+            GUI.backgroundColor = SelectedScanButtonColor;
+        }
+
+        bool clicked = GUILayout.Button(
+            buttonName,
+            GUILayout.Height(30)
+        );
+
+        // 恢复背景颜色，否则后面的 Fix、Clear 等按钮也会变色
+        GUI.backgroundColor = oldBackgroundColor;
+
+        return clicked;
+    }
+    
     private void DrawToolbar()
     {
         EditorGUILayout.BeginHorizontal();
 
-        if (GUILayout.Button("Scan Textures", GUILayout.Height(30)))
+        if (DrawScanButton("Scan Textures", ScanScope.Textures))
         {
             ScanTextures();
         }
 
-        if (GUILayout.Button("Scan Materials", GUILayout.Height(30)))
+        if (DrawScanButton("Scan Materials", ScanScope.Materials))
         {
             ScanMaterials();
         }
 
-        if (GUILayout.Button("Scan Models", GUILayout.Height(30)))
+        if (DrawScanButton("Scan Models", ScanScope.Models))
         {
             ScanModels();
         }
 
-        if (GUILayout.Button("Scan Prefabs", GUILayout.Height(30)))
+        if (DrawScanButton("Scan Prefabs", ScanScope.Prefabs))
         {
             ScanPrefabs();
         }
 
-        if (GUILayout.Button("Scan All", GUILayout.Height(30)))
+        if (DrawScanButton("Scan All", ScanScope.All))
         {
             ScanAll();
         }
@@ -216,7 +248,7 @@ public class TAAssetCheckerWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
 
-        if (GUILayout.Button("Scan Unused", GUILayout.Height(30)))
+        if (DrawScanButton("Scan Unused", ScanScope.Unused))
         {
             ScanUnusedAssets();
         }
@@ -941,6 +973,28 @@ public class TAAssetCheckerWindow : EditorWindow
 
         ScanModelsInternal(true);
     }
+    
+    /// <summary>
+    /// 项目资产没有变化时复用引用索引；
+    /// 资产发生导入、移动、删除或修改后自动重新生成。
+    /// </summary>
+    private AssetReferenceIndex GetOrBuildReferenceIndex()
+    {
+        uint currentVersion =
+            AssetDatabase.GlobalArtifactDependencyVersion;
+
+        bool cacheInvalid =
+            cachedReferenceIndex == null ||
+            cachedReferenceVersion != currentVersion;
+
+        if (cacheInvalid)
+        {
+            cachedReferenceIndex = AssetReferenceIndex.Build();
+            cachedReferenceVersion = currentVersion;
+        }
+
+        return cachedReferenceIndex;
+    }
 
     private void ScanPrefabs()
     {
@@ -1117,7 +1171,7 @@ public class TAAssetCheckerWindow : EditorWindow
 
     private void ScanUnusedAssetsInternal(bool log)
     {
-        AssetReferenceIndex referenceIndex = AssetReferenceIndex.Build();
+        AssetReferenceIndex referenceIndex = GetOrBuildReferenceIndex();
 
         UnusedAssetRule rule = new UnusedAssetRule(
             referenceIndex,

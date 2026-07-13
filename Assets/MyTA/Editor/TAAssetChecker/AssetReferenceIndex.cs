@@ -24,7 +24,7 @@ public class AssetReferenceIndex
         AssetReferenceIndex index = new AssetReferenceIndex();
 
         // 先明确扫描所有 Scene。
-        index.BuildSceneReferences();
+        // index.BuildSceneReferences();
 
         // 再扫描其他常见资源。
         index.BuildAssetReferences();
@@ -42,11 +42,15 @@ public class AssetReferenceIndex
             {
                 string scenePath = AssetDatabase.GUIDToAssetPath(sceneGuids[i]);
 
-                EditorUtility.DisplayProgressBar(
-                    "Building Scene Reference Index",
-                    scenePath,
-                    sceneGuids.Length > 0 ? (float)i / sceneGuids.Length : 1f
-                );
+                // 进度条不需要每个资源都更新，否则编辑器 UI 刷新本身也会产生开销。
+                if (i == 0 || i % 25 == 0 || i == sceneGuids.Length - 1)
+                {
+                    EditorUtility.DisplayProgressBar(
+                        "Building Asset Reference Index",
+                        scenePath,
+                        sceneGuids.Length > 0 ? (float)i / sceneGuids.Length : 1f
+                    );
+                }
 
                 if (string.IsNullOrEmpty(scenePath))
                     continue;
@@ -103,7 +107,7 @@ public class AssetReferenceIndex
 
         try
         {
-            dependencies = AssetDatabase.GetDependencies(rootPath, true);
+            dependencies = AssetDatabase.GetDependencies(rootPath, false);
         }
         catch
         {

@@ -1,8 +1,8 @@
 {
   "dependencies": {
     "com.ivanmurzak.unity.mcp": {
-      "version": "0.82.4",
-      "depth": 0,
+      "version": "0.83.1",
+      "depth": 1,
       "source": "registry",
       "dependencies": {
         "com.unity.test-framework": "1.1.33",
@@ -12,21 +12,21 @@
       "url": "https://package.openupm.com"
     },
     "com.ivanmurzak.unity.mcp.particlesystem": {
-      "version": "1.2.24",
+      "version": "1.2.25",
       "depth": 0,
       "source": "registry",
       "dependencies": {
-        "com.ivanmurzak.unity.mcp": "0.82.4",
+        "com.ivanmurzak.unity.mcp": "0.83.1",
         "com.unity.modules.particlesystem": "1.0.0"
       },
       "url": "https://package.openupm.com"
     },
     "com.ivanmurzak.unity.mcp.probuilder": {
-      "version": "1.2.24",
+      "version": "1.2.25",
       "depth": 0,
       "source": "registry",
       "dependencies": {
-        "com.ivanmurzak.unity.mcp": "0.82.4",
+        "com.ivanmurzak.unity.mcp": "0.83.1",
         "com.unity.probuilder": "5.2.4"
       },
       "url": "https://package.openupm.com"

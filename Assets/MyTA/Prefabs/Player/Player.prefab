@@ -242,6 +242,14 @@ MonoBehaviour:
   rightLegSplashParticle: {fileID: 0}
   legSplashHeightOffset: 0.02
   legSplashForwardOffset: 0.03
+  footWaterSplashPrefab: {fileID: 4799473912844777776, guid: a00e731cb2140724e9d9de920dc04a20,
+    type: 3}
+  enableFootWaterSplash: 1
+  minFootWaterSplashScale: 0.5
+  maxFootWaterSplashScale: 0.82
+  footWaterSplashMaxSpeed: 5.5
+  footWaterSplashSurfaceOffset: 0.015
+  footWaterSplashDestroyDelay: 2
   groundMask:
     serializedVersion: 2
     m_Bits: 2048
@@ -329,6 +337,14 @@ MonoBehaviour:
     type: 3}
   brushSize: {x: 0.18, y: 0.62}
   brushLife: 0.08
+  weaponWaterSplashPrefab: {fileID: 4799473912844777776, guid: a00e731cb2140724e9d9de920dc04a20,
+    type: 3}
+  enableWeaponWaterSplash: 1
+  weaponWaterSplashScale: 0.9
+  weaponWaterSplashCooldown: 0.2
+  maxWeaponWaterSplashesPerAttack: 2
+  weaponWaterSplashSurfaceOffset: 0.015
+  weaponWaterSplashDestroyDelay: 2
   useIdleBrushSettings: 1
   idleBrushPrefab: {fileID: 1007939427902686902, guid: f22d5b179376b174984234dedeb9b2f3,
     type: 3}
@@ -928,6 +944,8 @@ MonoBehaviour:
   grassInteractionBrushSpawner: {fileID: 0}
   enableWeaponWaterRipple: 1
   weaponWaterRipple: {fileID: 7652637918500950573}
+  enableWeaponGrassCut: 1
+  weaponGrassCut: {fileID: 0}
   logEvent: 0
 --- !u!4 &3379446885180428983 stripped
 Transform:
@@ -1633,6 +1651,8 @@ MonoBehaviour:
   grassInteractionBrushSpawner: {fileID: 0}
   enableWeaponWaterRipple: 1
   weaponWaterRipple: {fileID: 7652637918500950573}
+  enableWeaponGrassCut: 1
+  weaponGrassCut: {fileID: 0}
   logEvent: 0
 --- !u!4 &6698199317100615859 stripped
 Transform:

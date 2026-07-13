@@ -129,6 +129,33 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
     [Tooltip("攻击 Brush 生命周期。需要至少存活到 WaterRippleCamera 渲染一次。")]
     public float brushLife = 0.04f;
 
+    [Header("Weapon Water Splash")]
+    [Tooltip("One-shot splash prefab. Local +Z follows the sword motion and local +Y follows the water normal.")]
+    public GameObject weaponWaterSplashPrefab;
+
+    [Tooltip("Enables splash particles only while the attack water-cut window is active.")]
+    public bool enableWeaponWaterSplash = true;
+
+    [Tooltip("Independent uniform scale for sword splashes.")]
+    [Min(0.01f)]
+    public float weaponWaterSplashScale = 0.72f;
+
+    [Tooltip("Global cooldown shared by every sword probe, preventing all probes from bursting in one frame.")]
+    [Min(0f)]
+    public float weaponWaterSplashCooldown = 0.20f;
+
+    [Tooltip("Maximum particle bursts produced by one attack animation.")]
+    [Min(1)]
+    public int maxWeaponWaterSplashesPerAttack = 2;
+
+    [Tooltip("Small lift along the water normal to avoid sorting artifacts with the water surface.")]
+    [Min(0f)]
+    public float weaponWaterSplashSurfaceOffset = 0.015f;
+
+    [Tooltip("Failsafe lifetime for spawned instances. The prefab also destroys itself when its root particle stops.")]
+    [Min(0.1f)]
+    public float weaponWaterSplashDestroyDelay = 2f;
+
 
     // ============================================================
     // Non Attack Brush
@@ -243,6 +270,8 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
     // 用来决定使用 weaponBrushPrefab 还是 idleBrushPrefab，以及使用哪套移动阈值。
     private bool isAttackWindowActive;
     private float attackWindowStartTime = -999f;
+    private float lastWeaponWaterSplashTime = -999f;
+    private int weaponWaterSplashesThisAttack;
 
     // 每个检测点是否已经记录过上一帧位置。
     // 第一次记录位置时不生成 Brush，避免从默认值跳到当前位置产生异常长轨迹。
@@ -337,6 +366,8 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
         isDetecting = true;
         isAttackWindowActive = true;
         attackWindowStartTime = Time.time;
+        lastWeaponWaterSplashTime = -999f;
+        weaponWaterSplashesThisAttack = 0;
     }
 
     /// <summary>
@@ -426,6 +457,13 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
         // 就认为攻击 Brush 已经失效。
         if (maxAttackWindowDuration > 0f && elapsed > maxAttackWindowDuration)
             return false;
+
+        if (playerAttack != null &&
+            elapsed >= attackStateValidationDelay &&
+            !playerAttack.IsAttackActive)
+        {
+            return false;
+        }
 
         // 攻击窗口已开启，并且还没有超过最大持续时间，
         // 当前帧仍然允许使用攻击 Brush。
@@ -569,6 +607,9 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
                 strengthMultiplier: strengthMultiplier
             );
 
+            if (useAttackBrush)
+                TrySpawnWeaponWaterSplash(waterHit.point, waterNormal, stampForward);
+
             if (!spawned)
                 continue;
 
@@ -597,6 +638,42 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
         // 只有真的生成过 Brush，才刷新冷却时间。
         if (spawnedAny)
             lastSpawnTimes[index] = Time.time;
+    }
+
+    private bool TrySpawnWeaponWaterSplash(
+        Vector3 surfacePosition,
+        Vector3 surfaceNormal,
+        Vector3 splashForward)
+    {
+        if (!enableWeaponWaterSplash || weaponWaterSplashPrefab == null)
+            return false;
+
+        if (Time.time - lastWeaponWaterSplashTime < weaponWaterSplashCooldown)
+            return false;
+
+        if (weaponWaterSplashesThisAttack >= Mathf.Max(1, maxWeaponWaterSplashesPerAttack))
+            return false;
+
+        Vector3 normal = GetUsableWaterNormal(surfaceNormal);
+        Vector3 forward = Vector3.ProjectOnPlane(splashForward, normal);
+
+        if (forward.sqrMagnitude < 0.0001f)
+            forward = Vector3.ProjectOnPlane(transform.forward, normal);
+        if (forward.sqrMagnitude < 0.0001f)
+            forward = Vector3.ProjectOnPlane(Vector3.forward, normal);
+
+        forward.Normalize();
+
+        Vector3 position = surfacePosition + normal * Mathf.Max(0f, weaponWaterSplashSurfaceOffset);
+        Quaternion rotation = Quaternion.LookRotation(forward, normal);
+        GameObject instance = Instantiate(weaponWaterSplashPrefab, position, rotation);
+        instance.transform.localScale =
+            weaponWaterSplashPrefab.transform.localScale * Mathf.Max(0.01f, weaponWaterSplashScale);
+
+        Destroy(instance, Mathf.Max(0.1f, weaponWaterSplashDestroyDelay));
+        lastWeaponWaterSplashTime = Time.time;
+        weaponWaterSplashesThisAttack++;
+        return true;
     }
 
     /// <summary>

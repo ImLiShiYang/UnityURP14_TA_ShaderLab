@@ -129,6 +129,33 @@ public class WaterRippleBrushSpawner : MonoBehaviour
 
     public float legSplashHeightOffset = 0.02f;
     public float legSplashForwardOffset = 0.03f;
+
+    [Header("Foot Water Splash")]
+    [Tooltip("One-shot water splash prefab. Local +Z must point along movement and local +Y along the water normal.")]
+    public GameObject footWaterSplashPrefab;
+
+    [Tooltip("Enables the one-shot splash emitted by left/right foot animation events.")]
+    public bool enableFootWaterSplash = true;
+
+    [Tooltip("Uniform splash scale while barely moving.")]
+    [Min(0.01f)]
+    public float minFootWaterSplashScale = 0.32f;
+
+    [Tooltip("Uniform splash scale at or above Foot Splash Max Speed.")]
+    [Min(0.01f)]
+    public float maxFootWaterSplashScale = 0.58f;
+
+    [Tooltip("Horizontal character speed, in metres per second, that maps to the maximum splash scale.")]
+    [Min(0.01f)]
+    public float footWaterSplashMaxSpeed = 5.5f;
+
+    [Tooltip("Small lift along the water normal to avoid transparent sorting and z-fighting with the water surface.")]
+    [Min(0f)]
+    public float footWaterSplashSurfaceOffset = 0.015f;
+
+    [Tooltip("Failsafe lifetime for spawned instances. The prefab also destroys itself when its root particle stops.")]
+    [Min(0.1f)]
+    public float footWaterSplashDestroyDelay = 2f;
     
     // ============================================================
     // Raycast
@@ -339,6 +366,9 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     private float lastLeftFootTime = -999f;
     private float lastRightFootTime = -999f;
 
+    // Used for true horizontal movement speed so splash size is continuous rather than walk/run only.
+    private CharacterController characterController;
+
     // [说明] 每帧脚下水波使用：记录上一帧成功生成点，用移动距离过滤站立抖动。
     private bool hasLastLeftEveryFramePoint;
     private bool hasLastRightEveryFramePoint;
@@ -415,6 +445,8 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         if (playerController == null)
             playerController = GetComponentInParent<ThirdPersonPlayerController>();
 
+        characterController = GetComponentInParent<CharacterController>();
+
         // [说明] playerAttack 用来判断攻击窗口。攻击期间如果 allowEveryFrameFootRippleDuringAttack=true，
         // [说明] 每帧脚下水波可以不受 HasMoveInput / MoveSpeed 的限制。
         if (playerAttack == null)
@@ -461,7 +493,6 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         }
 
         // [说明] 如果角色是 Humanoid，并且 Inspector 没手动指定脚骨骼，就从 Animator 自动拿 Foot / Toes。
-        if (animator != null)
         if (animator != null)
         {
             if (leftFoot == null)
@@ -621,8 +652,10 @@ public class WaterRippleBrushSpawner : MonoBehaviour
     {
         // [说明] 开启每帧水波时，默认屏蔽原来的落脚/距离水波，避免两套输入叠在一起。
         // [说明] ignoreMovementGuard=true 一般来自调试按键，仍然允许手动测试。
-        if (!ignoreMovementGuard && enableEveryFrameFootRipple && blockStepRippleWhenEveryFrameEnabled)
-            return;
+        bool suppressStepBrush =
+            !ignoreMovementGuard &&
+            enableEveryFrameFootRipple &&
+            blockStepRippleWhenEveryFrameEnabled;
 
         // [说明] 不忽略移动保护时，先检查当前是否真的允许生成水波。
         // [说明] 例如刚开局、没移动输入、MoveSpeed 太低、prefab 未绑定时都会被拦截。
@@ -634,17 +667,29 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             return;
 
         // [说明] 记录左脚这次生成时间，然后把左脚骨骼、左脚脚趾、左脚贴图传给通用生成函数。
-        lastLeftFootTime = Time.time;
+        bool spawned = SpawnWaterRipple(
+            true,
+            leftFoot,
+            leftToes,
+            leftNormalTex,
+            leftHeightTex,
+            rejectIfFootTooHighFromSurface: true,
+            spawnBrush: !suppressStepBrush,
+            spawnFootSplashParticle: true
+        );
 
-        SpawnWaterRipple(true,leftFoot,leftToes,leftNormalTex,leftHeightTex);
+        if (spawned)
+            lastLeftFootTime = Time.time;
     }
 
     // [说明] 右脚内部生成入口，逻辑和左脚一致，只是传入右脚骨骼和右脚贴图。
     private void SpawnRightWaterRipple(bool ignoreMovementGuard)
     {
         // [说明] 开启每帧水波时，默认屏蔽原来的落脚/距离水波，避免两套输入叠在一起。
-        if (!ignoreMovementGuard && enableEveryFrameFootRipple && blockStepRippleWhenEveryFrameEnabled)
-            return;
+        bool suppressStepBrush =
+            !ignoreMovementGuard &&
+            enableEveryFrameFootRipple &&
+            blockStepRippleWhenEveryFrameEnabled;
 
         if (!ignoreMovementGuard && !CanSpawnWaterRipple())
             return;
@@ -654,9 +699,19 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             return;
 
         // [说明] 记录右脚这次生成时间，然后把右脚数据交给 SpawnWaterRipple 统一处理。
-        lastRightFootTime = Time.time;
+        bool spawned = SpawnWaterRipple(
+            false,
+            rightFoot,
+            rightToes,
+            rightNormalTex,
+            rightHeightTex,
+            rejectIfFootTooHighFromSurface: true,
+            spawnBrush: !suppressStepBrush,
+            spawnFootSplashParticle: true
+        );
 
-        SpawnWaterRipple(false,rightFoot,rightToes,rightNormalTex,rightHeightTex);
+        if (spawned)
+            lastRightFootTime = Time.time;
 
     }
 
@@ -877,12 +932,14 @@ public class WaterRippleBrushSpawner : MonoBehaviour
         Texture normalTex,
         Texture heightTex,
         float? overrideBrushLife = null,
-        bool rejectIfFootTooHighFromSurface = false)
+        bool rejectIfFootTooHighFromSurface = false,
+        bool spawnBrush = true,
+        bool spawnFootSplashParticle = false)
     {
         GameObject sourceBrushPrefab = GetDefaultBrushPrefab();
 
         // [说明] 没有 Brush prefab 就无法生成临时投影 Quad，直接退出。
-        if (sourceBrushPrefab == null)
+        if (spawnBrush && sourceBrushPrefab == null)
             return false;
 
         // [说明] 将 bool 类型的左右脚转换成 Debug 用枚举，方便后面缓存和绘制 Gizmos。
@@ -1057,36 +1114,90 @@ public class WaterRippleBrushSpawner : MonoBehaviour
             currentBrushSize
         );
 
-        float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
-        Vector3 brushScale = overrideBrushScale
-            ? new Vector3(currentBrushSize.x, currentBrushSize.y, 1f)
-            : sourceBrushPrefab.transform.localScale;
+        bool brushSpawned = false;
+        if (spawnBrush)
+        {
+            float life = overrideBrushLife.HasValue ? overrideBrushLife.Value : brushLife;
+            Vector3 brushScale = overrideBrushScale
+                ? new Vector3(currentBrushSize.x, currentBrushSize.y, 1f)
+                : sourceBrushPrefab.transform.localScale;
 
-        GameObject brush = SpawnBrushObject(
-            sourceBrushPrefab,
-            spawnPosition,
-            spawnRotation,
-            brushScale,
-            life,
-            normalTex,
-            heightTex,
-            1f
-        );
+            GameObject brush = SpawnBrushObject(
+                sourceBrushPrefab,
+                spawnPosition,
+                spawnRotation,
+                brushScale,
+                life,
+                normalTex,
+                heightTex,
+                1f
+            );
 
-        if (brush == null)
+            brushSpawned = brush != null;
+        }
+
+        bool splashSpawned = spawnFootSplashParticle &&
+            SpawnFootWaterSplash(spawnPosition, normal, forwardOnSurface);
+
+        if (!brushSpawned && !splashSpawned)
             return false;
-
-        // SpawnFootSplashParticle(spawnPosition, normal);
         
         if (logSpawn)
         {
             Debug.Log(
-                $"[WaterRippleBrushSpawner] Spawn {(isLeftFoot ? "Left" : "Right")} Brush. " +
+                $"[WaterRippleBrushSpawner] Spawn {(isLeftFoot ? "Left" : "Right")} water response. " +
                 $"hit={hit.point}, spawn={spawnPosition}, normal={normal}, forward={forwardOnSurface}"
             );
         }
 
         return true;
+    }
+
+    private bool SpawnFootWaterSplash(Vector3 surfacePosition, Vector3 surfaceNormal, Vector3 forwardOnSurface)
+    {
+        if (!enableFootWaterSplash || footWaterSplashPrefab == null)
+            return false;
+
+        Vector3 normal = surfaceNormal.sqrMagnitude > 0.0001f
+            ? surfaceNormal.normalized
+            : Vector3.up;
+
+        Vector3 forward = Vector3.ProjectOnPlane(forwardOnSurface, normal);
+        if (forward.sqrMagnitude < 0.0001f && characterRoot != null)
+            forward = Vector3.ProjectOnPlane(characterRoot.forward, normal);
+        if (forward.sqrMagnitude < 0.0001f)
+            forward = Vector3.ProjectOnPlane(Vector3.forward, normal);
+
+        forward.Normalize();
+
+        float speed01 = GetFootWaterSplashSpeed01();
+        float scale = Mathf.Lerp(
+            Mathf.Max(0.01f, minFootWaterSplashScale),
+            Mathf.Max(0.01f, maxFootWaterSplashScale),
+            speed01
+        );
+
+        Vector3 position = surfacePosition + normal * Mathf.Max(0f, footWaterSplashSurfaceOffset);
+        Quaternion rotation = Quaternion.LookRotation(forward, normal);
+        GameObject instance = Instantiate(footWaterSplashPrefab, position, rotation);
+        instance.transform.localScale = footWaterSplashPrefab.transform.localScale * scale;
+        Destroy(instance, Mathf.Max(0.1f, footWaterSplashDestroyDelay));
+        return true;
+    }
+
+    private float GetFootWaterSplashSpeed01()
+    {
+        if (characterController != null)
+        {
+            Vector3 velocity = characterController.velocity;
+            float horizontalSpeed = new Vector2(velocity.x, velocity.z).magnitude;
+            return Mathf.Clamp01(horizontalSpeed / Mathf.Max(0.01f, footWaterSplashMaxSpeed));
+        }
+
+        if (animator != null && HasAnimatorFloat(animator, moveSpeedParam))
+            return Mathf.Clamp01(animator.GetFloat(moveSpeedParam));
+
+        return playerController != null && playerController.HasMoveInput ? 0.5f : 0f;
     }
 
     // [说明] 表面遮罩兼容旧 / 新命名，只要求目标组件提供 bool CanSpawnAt(Vector3) 方法。

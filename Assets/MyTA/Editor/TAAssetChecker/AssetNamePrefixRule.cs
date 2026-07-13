@@ -176,17 +176,24 @@ public class AssetNamePrefixRule : AssetCheckRule
         Debug.Log($"TA Asset Checker: 已重命名资源：{assetPath} -> {newName}");
     }
 
+    /// <summary>
+    /// 判断资源名称是否满足配置的命名前缀规范。
+    /// 如果未配置前缀规则，则默认通过。
+    /// </summary>
     private bool HasAllowedPrefix(string assetName)
     {
+        // 未设置允许前缀，不限制命名
         if (allowedPrefixes == null || allowedPrefixes.Length == 0)
             return true;
 
+        // 检查名称是否匹配任意一个允许前缀
         foreach (string prefix in allowedPrefixes)
         {
             if (assetName.StartsWith(prefix))
                 return true;
         }
 
+        // 没有匹配任何前缀
         return false;
     }
 
