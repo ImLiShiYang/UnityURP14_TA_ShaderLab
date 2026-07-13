@@ -16,6 +16,10 @@ public class TAAssetCheckerWindow : EditorWindow
     private Vector2 scrollPos;
     private ResultFilter resultFilter = ResultFilter.All;
     private ScanScope lastScanScope = ScanScope.Textures;
+    
+    // 是否点击过扫描按钮
+    private bool hasSelectedScanScope = false;
+    
     private UnusedAssetTypeFilter unusedAssetTypeFilter = UnusedAssetTypeFilter.All;
     
     // 扫描按钮被选中后显示的颜色
@@ -195,11 +199,11 @@ public class TAAssetCheckerWindow : EditorWindow
     /// </summary>
     private bool DrawScanButton(string buttonName, ScanScope buttonScope)
     {
-        // 保存原来的按钮背景颜色，避免影响后面的按钮
+        // 保存原来的按钮颜色
         Color oldBackgroundColor = GUI.backgroundColor;
 
-        // 当前按钮是最近一次点击的扫描类型时，显示选中颜色
-        if (lastScanScope == buttonScope)
+        // 必须点击过扫描按钮，并且是当前扫描类型，才显示选中颜色
+        if (hasSelectedScanScope && lastScanScope == buttonScope)
         {
             GUI.backgroundColor = SelectedScanButtonColor;
         }
@@ -209,8 +213,15 @@ public class TAAssetCheckerWindow : EditorWindow
             GUILayout.Height(30)
         );
 
-        // 恢复背景颜色，否则后面的 Fix、Clear 等按钮也会变色
+        // 恢复按钮颜色
         GUI.backgroundColor = oldBackgroundColor;
+
+        // 点击后记录当前选中的扫描类型
+        if (clicked)
+        {
+            hasSelectedScanScope = true;
+            lastScanScope = buttonScope;
+        }
 
         return clicked;
     }
@@ -219,27 +230,27 @@ public class TAAssetCheckerWindow : EditorWindow
     {
         EditorGUILayout.BeginHorizontal();
 
-        if (DrawScanButton("Scan Textures", ScanScope.Textures))
+        if (DrawScanButton("扫描贴图", ScanScope.Textures))
         {
             ScanTextures();
         }
 
-        if (DrawScanButton("Scan Materials", ScanScope.Materials))
+        if (DrawScanButton("扫描材质", ScanScope.Materials))
         {
             ScanMaterials();
         }
 
-        if (DrawScanButton("Scan Models", ScanScope.Models))
+        if (DrawScanButton("扫描模型", ScanScope.Models))
         {
             ScanModels();
         }
 
-        if (DrawScanButton("Scan Prefabs", ScanScope.Prefabs))
+        if (DrawScanButton("扫描预制体", ScanScope.Prefabs))
         {
             ScanPrefabs();
         }
 
-        if (DrawScanButton("Scan All", ScanScope.All))
+        if (DrawScanButton("扫描全部", ScanScope.All))
         {
             ScanAll();
         }
@@ -248,19 +259,19 @@ public class TAAssetCheckerWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
 
-        if (DrawScanButton("Scan Unused", ScanScope.Unused))
+        if (DrawScanButton("扫描未使用资产", ScanScope.Unused))
         {
             ScanUnusedAssets();
         }
 
-        if (GUILayout.Button("Fix All Failed", GUILayout.Height(30)))
+        if (GUILayout.Button("修复全部失败项", GUILayout.Height(30)))
         {
             FixAllFailed();
         }
 
         EditorGUI.BeginDisabledGroup(rollbackGroups.Count == 0);
 
-        if (GUILayout.Button("Rollback Last Fix", GUILayout.Height(30)))
+        if (GUILayout.Button("撤销上次修复", GUILayout.Height(30)))
         {
             RollbackLastFix();
         }
@@ -269,20 +280,19 @@ public class TAAssetCheckerWindow : EditorWindow
 
         EditorGUI.BeginDisabledGroup(softDeleteRollbackRecords.Count == 0);
 
-        if (GUILayout.Button("Rollback Last Soft Delete", GUILayout.Height(30)))
+        if (GUILayout.Button("撤销上次软删除", GUILayout.Height(30)))
         {
             RollbackLastSoftDelete();
         }
 
         EditorGUI.EndDisabledGroup();
 
-        if (GUILayout.Button("Clear", GUILayout.Height(30)))
+        if (GUILayout.Button("清空结果", GUILayout.Height(30)))
         {
             results.Clear();
         }
 
         EditorGUILayout.EndHorizontal();
-
         EditorGUILayout.Space(8);
     }
 
@@ -686,7 +696,10 @@ public class TAAssetCheckerWindow : EditorWindow
 
         if (results.Count == 0)
         {
-            EditorGUILayout.HelpBox("还没有检测结果。点击 Scan Textures / Scan Models / Scan All 开始扫描。", MessageType.None);
+            EditorGUILayout.HelpBox(
+                "还没有检测结果。点击扫描贴图、扫描模型或扫描全部开始扫描。",
+                MessageType.None
+            );
             return;
         }
 
@@ -802,17 +815,7 @@ public class TAAssetCheckerWindow : EditorWindow
         {
             PingAsset(assetPath);
         }
-
-        if (visibleHasFailed && HasFixableFailedResult(visibleResults))
-        {
-            if (GUILayout.Button("修复全部", GUILayout.Width(80), GUILayout.Height(22)))
-            {
-                FixAssetFailedResultsWithRollback(visibleResults);
-                RefreshLastScan();
-
-                GUIUtility.ExitGUI();
-            }
-        }
+        
 
         EditorGUILayout.EndHorizontal();
 
