@@ -65,6 +65,7 @@ public class FootprintDecalSpawner : MonoBehaviour
     [Tooltip("脚印 Decal prefab，需要挂 ScreenSpaceDecalProjector。")]
     public ScreenSpaceDecalProjector footprintPrefab;
 
+    //L_footprint2_GeneratedDecal.png
     [Tooltip("左脚脚印贴图。")]
     public Texture2D leftFootTexture;
 

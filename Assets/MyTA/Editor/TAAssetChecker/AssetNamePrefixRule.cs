@@ -351,6 +351,7 @@ public class AssetNamePrefixRule : AssetCheckRule
         return result;
     }
 
+    
     private bool ContainsReference(string content, string oldPath, string oldPathWithoutExtension, string assetName)
     {
         if (content.Contains(oldPath))
@@ -359,6 +360,7 @@ public class AssetNamePrefixRule : AssetCheckRule
         if (content.Contains(oldPathWithoutExtension))
             return true;
 
+        //
         if (content.Contains(assetName))
             return true;
 

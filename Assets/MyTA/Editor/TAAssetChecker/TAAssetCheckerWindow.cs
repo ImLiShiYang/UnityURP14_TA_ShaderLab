@@ -516,10 +516,10 @@ public class TAAssetCheckerWindow : EditorWindow
                 return "模型命名";
 
             case RuleDetailFilter.PrefabMissingScript:
-                return "Missing Script";
+                return "脚本缺失";
 
             case RuleDetailFilter.PrefabName:
-                return "Prefab 命名";
+                return "预制体命名";
 
             case RuleDetailFilter.UnusedAsset:
                 return "未使用资产";
