@@ -172,10 +172,32 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
         //
         // 这样你在 Inspector 修改 LayerMask、PassEvent 等配置时，
         // Pass 可以拿到最新值。
-        _pass.Setup(settings);
+        // A single renderer feature services all light cameras.  Resolve the
+        // cascade from the camera name so Cascade0 and Cascade1 do not both
+        // overwrite the same global shadow texture.
+        _pass.Setup(settings, ResolveCascadeIndex(currentCamera));
 
         // 把自定义 Pass 加入 URP 的渲染流程。
         renderer.EnqueuePass(_pass);
+    }
+
+    private int ResolveCascadeIndex(Camera camera)
+    {
+        const string cascadeToken = "Cascade";
+        string cameraName = camera.name;
+        int tokenIndex = cameraName.LastIndexOf(cascadeToken, StringComparison.OrdinalIgnoreCase);
+
+        if (tokenIndex >= 0)
+        {
+            int digitIndex = tokenIndex + cascadeToken.Length;
+            if (digitIndex < cameraName.Length &&
+                int.TryParse(cameraName.Substring(digitIndex, 1), out int cameraCascadeIndex))
+            {
+                return Mathf.Clamp(cameraCascadeIndex, 0, 3);
+            }
+        }
+
+        return Mathf.Clamp(settings.cascadeIndex, 0, 3);
     }
 
     /// <summary>
@@ -258,6 +280,11 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
         /// 保存从 Feature 传进来的配置。
         /// </summary>
         private Settings _settings;
+
+        // This is per enqueued light camera.  It must not be taken directly
+        // from the shared Settings object when several cascade cameras use
+        // the same renderer feature.
+        private int _cascadeIndex;
 
         /// <summary>
         /// 颜色 RT。
@@ -342,7 +369,7 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
         /// </summary>
         public CustomDepthPass(Settings settings)
         {
-            Setup(settings);
+            Setup(settings, Mathf.Clamp(settings.cascadeIndex, 0, 3));
         }
         
         private static Matrix4x4 GetTextureScaleAndBiasMatrix()
@@ -369,20 +396,19 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
         /// AddRenderPasses 每帧会调用它，
         /// 所以你在 Inspector 改设置时可以立即生效。
         /// </summary>
-        public void Setup(Settings settings)
+        public void Setup(Settings settings, int cascadeIndex)
         {
             _settings = settings;
+            _cascadeIndex = Mathf.Clamp(cascadeIndex, 0, 3);
 
             // 设置这个 Pass 插入到 URP 管线里的时机。
             renderPassEvent = settings.renderPassEvent;
 
             // 把纹理名转成 int ID，后面 SetGlobalTexture 使用。
-            int cascadeIndex = Mathf.Clamp(settings.cascadeIndex, 0, 3);
-
             if (string.IsNullOrEmpty(settings.textureName))
             {
-                _textureId = CustomDepthTextureIDs[cascadeIndex];
-                _rtName = CustomDepthTextureNames[cascadeIndex];
+                _textureId = CustomDepthTextureIDs[_cascadeIndex];
+                _rtName = CustomDepthTextureNames[_cascadeIndex];
             }
             else
             {
@@ -627,7 +653,7 @@ public class CustomDepthTextureFeature : ScriptableRendererFeature
                 float nearPlane = lightCamera.nearClipPlane;
                 float farPlane = lightCamera.farClipPlane;
 
-                int cascadeIndex = Mathf.Clamp(_settings.cascadeIndex, 0, 3);
+                int cascadeIndex = _cascadeIndex;
 
                 cmd.SetGlobalMatrix(WorldToLightUVMatrixIDs[cascadeIndex], worldToLightUVMatrix);
                 cmd.SetGlobalMatrix(WorldToLightViewMatrixIDs[cascadeIndex], viewMatrix);

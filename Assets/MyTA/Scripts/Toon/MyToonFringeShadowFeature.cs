@@ -81,7 +81,9 @@ public class MyToonFringeShadowFeature : ScriptableRendererFeature
             RenderingUtils.ReAllocateIfNeeded(
                 ref fringeShadowRT,
                 colorDesc,
-                FilterMode.Bilinear,
+                // 颜色通道存的是原始深度，不能与黑色清屏值做双线性混合。
+                // Point 采样可避免头发轮廓在相机远近变化时产生错误深度。
+                FilterMode.Point,
                 TextureWrapMode.Clamp,
                 name: FringeShadowTexName
             );

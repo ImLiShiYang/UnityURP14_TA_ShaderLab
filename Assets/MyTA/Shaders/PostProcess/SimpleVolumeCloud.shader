@@ -142,6 +142,7 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             float _StepCount;
             float _LightStepCount;
             float _StepJitter;
+            float _TemporalFrameIndex;
 
             float4 _WindDirection;
             float _WindSpeed;
@@ -352,21 +353,11 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             float3 erosionSamplePosWS = GetCloudAnimatedPosition(posWS, 1.7);
 
             float3 shapeUV = shapeSamplePosWS * _CloudScale;
-            float shapeNoise = SAMPLE_TEXTURE3D_LOD(
-                _CloudShapeNoiseTex,
-                sampler_CloudShapeNoiseTex,
-                shapeUV,
-                0
-            ).r;
-
+            float shapeNoise = SAMPLE_TEXTURE3D_LOD(_CloudShapeNoiseTex,sampler_CloudShapeNoiseTex,shapeUV, 0).r;
+            
             float3 erosionUV = erosionSamplePosWS * _CloudScale * _ErosionNoiseScale;
-            float erosionNoise = SAMPLE_TEXTURE3D_LOD(
-                _CloudErosionNoiseTex,
-                sampler_CloudErosionNoiseTex,
-                erosionUV,
-                0
-            ).r;
-
+            float erosionNoise = SAMPLE_TEXTURE3D_LOD(_CloudErosionNoiseTex,sampler_CloudErosionNoiseTex, erosionUV,0).r;
+            
             // 参照 jiaozi 项目的思路：大形状噪声决定云块，高频噪声侵蚀边缘。
             float noise = shapeNoise;
             noise -= (1.0 - erosionNoise) * _ErosionStrength;
@@ -504,8 +495,12 @@ Shader "MyTA/Volumetric/SimpleVolumeCloud"
             float marchDistance = tFar - tNear;
             float stepSize = marchDistance / max(1, stepCount);
 
-            float jitter = CloudInterleavedGradientNoise(uv * _ScreenParams.xy);
-            jitter = lerp(0.5, jitter, saturate(_StepJitter));
+            float baseJitter =CloudInterleavedGradientNoise(uv * _ScreenParams.xy);
+            float temporalOffset =_TemporalFrameIndex * 0.61803398875;
+                
+            float jitter = frac(baseJitter + temporalOffset);
+
+            jitter = lerp(0.5,jitter,saturate(_StepJitter));
 
             Light mainLight = GetMainLight();
 

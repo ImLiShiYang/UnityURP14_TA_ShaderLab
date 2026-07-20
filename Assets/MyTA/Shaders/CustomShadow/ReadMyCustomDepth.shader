@@ -3,6 +3,7 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
     Properties
     {
         _BaseColor("Base Color", Color) = (1, 1, 1, 1)
+        _ShadowColor("Shadow Ink Color", Color) = (0.141, 0.196, 0.278, 0.88)
         _AmbientStrength("Ambient Strength", Range(0, 1)) = 0.25
         _DiffuseStrength("Diffuse Strength", Range(0, 1)) = 0.8
 
@@ -88,6 +89,7 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 float _DiffuseStrength;
             
                 half4 _BaseColor;
+                half4 _ShadowColor;
                 float _DebugMode;
                 float _DepthBias;
                 float _ShadowStrength;
@@ -536,8 +538,9 @@ Shader "Unlit/ReadMyCustomDepth_Shadow_Fixed"
                 // 这样不会出现一条硬线。
                 // shadow *= edgeFade;
                 
-                float shadowFactor = lerp(1.0, 1.0 - _ShadowStrength, shadow);
-                float3 finalColor = saturate(ambient + diffuse * shadowFactor);
+                float3 litColor = saturate(ambient + diffuse);
+                float inkAmount = saturate(shadow * _ShadowStrength) * _ShadowColor.a;
+                float3 finalColor = lerp(litColor, _ShadowColor.rgb, inkAmount);
 
                 return float4(finalColor, _BaseColor.a);
             }

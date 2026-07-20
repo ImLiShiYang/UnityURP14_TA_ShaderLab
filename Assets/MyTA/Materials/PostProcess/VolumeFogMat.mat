@@ -111,7 +111,7 @@ Material:
     - _EnvironmentReflections: 1
     - _Extinction: 1.12
     - _FogBaseHeight: 0
-    - _FogDensity: 0.0695
+    - _FogDensity: 0.0829
     - _FogIntensity: 1.76
     - _FogStartDistance: 5.88
     - _GlossMapScale: 0

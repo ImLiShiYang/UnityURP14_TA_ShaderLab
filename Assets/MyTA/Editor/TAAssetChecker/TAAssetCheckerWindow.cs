@@ -2,10 +2,12 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
-using UnityEditor.SceneManagement;
 
 public class TAAssetCheckerWindow : EditorWindow
 {
+    private readonly TAAssetCheckerSceneLocator sceneScriptLocator =
+        new TAAssetCheckerSceneLocator();
+
     private string scanFolder = "Assets";
     private int maxTextureSize = 1024;
     private bool expectedMipMapEnabled = true;
@@ -103,6 +105,7 @@ public class TAAssetCheckerWindow : EditorWindow
     private void OnGUI()
     {
         DrawHeader();
+        sceneScriptLocator.Draw();
         DrawSettings();
         DrawToolbar();
         DrawSummary();
@@ -264,7 +267,7 @@ public class TAAssetCheckerWindow : EditorWindow
             ScanUnusedAssets();
         }
 
-        if (GUILayout.Button("修复全部失败项", GUILayout.Height(30)))
+        if (GUILayout.Button("修复当前页面失败项", GUILayout.Height(30)))
         {
             FixAllFailed();
         }
@@ -928,7 +931,7 @@ public class TAAssetCheckerWindow : EditorWindow
         {
             if (!result.passed && result.canFix)
             {
-                FixResultWithRollback(result, rollbackGroup);
+                FixResultWithRollback(result, rollbackGroup, false);
             }
         }
 
@@ -981,12 +984,13 @@ public class TAAssetCheckerWindow : EditorWindow
     /// 项目资产没有变化时复用引用索引；
     /// 资产发生导入、移动、删除或修改后自动重新生成。
     /// </summary>
-    private AssetReferenceIndex GetOrBuildReferenceIndex()
+    private AssetReferenceIndex GetOrBuildReferenceIndex(bool forceRebuild = false)
     {
         uint currentVersion =
             AssetDatabase.GlobalArtifactDependencyVersion;
 
         bool cacheInvalid =
+            forceRebuild ||
             cachedReferenceIndex == null ||
             cachedReferenceVersion != currentVersion;
 
@@ -1157,24 +1161,13 @@ public class TAAssetCheckerWindow : EditorWindow
         if (!IsScanFolderValid())
             return;
 
-        // 重点：未保存的场景改动不会写入 .unity 文件。
-        // 如果你刚把 Prefab 拖进某个 Scene，但没保存，依赖扫描可能读不到。
-        bool saveScenes = EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo();
-
-        if (!saveScenes)
-        {
-            Debug.LogWarning("TA Asset Checker: 用户取消保存场景，已取消未使用资产扫描。");
-            return;
-        }
-
-        AssetDatabase.SaveAssets();
-
         ScanUnusedAssetsInternal(true);
     }
 
     private void ScanUnusedAssetsInternal(bool log)
     {
-        AssetReferenceIndex referenceIndex = GetOrBuildReferenceIndex();
+        // 场景中的引用可能只存在于内存中，每次主动扫描都重新建立索引。
+        AssetReferenceIndex referenceIndex = GetOrBuildReferenceIndex(true);
 
         UnusedAssetRule rule = new UnusedAssetRule(
             referenceIndex,
@@ -1337,31 +1330,51 @@ public class TAAssetCheckerWindow : EditorWindow
 
     private void RefreshLastScan()
     {
-        switch (lastScanScope)
+        RuleDetailFilter previousRuleDetailFilter = ruleDetailFilter;
+        UnusedAssetTypeFilter previousUnusedAssetTypeFilter = unusedAssetTypeFilter;
+
+        try
         {
-            case ScanScope.Textures:
-                ScanTextures();
-                break;
+            switch (lastScanScope)
+            {
+                case ScanScope.Textures:
+                    ScanTextures();
+                    break;
 
-            case ScanScope.Materials:
-                ScanMaterials();
-                break;
+                case ScanScope.Materials:
+                    ScanMaterials();
+                    break;
 
-            case ScanScope.Models:
-                ScanModels();
-                break;
+                case ScanScope.Models:
+                    ScanModels();
+                    break;
 
-            case ScanScope.Prefabs:
-                ScanPrefabs();
-                break;
+                case ScanScope.Prefabs:
+                    ScanPrefabs();
+                    break;
 
-            case ScanScope.Unused:
-                ScanUnusedAssets();
-                break;
+                case ScanScope.Unused:
+                    ScanUnusedAssets();
+                    break;
 
-            case ScanScope.All:
-                ScanAll();
-                break;
+                case ScanScope.All:
+                    ScanAll();
+                    break;
+            }
+        }
+        finally
+        {
+            RuleDetailFilter[] availableFilters = GetCurrentRuleFilterOptions();
+
+            if (System.Array.IndexOf(availableFilters, previousRuleDetailFilter) >= 0)
+            {
+                ruleDetailFilter = previousRuleDetailFilter;
+            }
+
+            if (lastScanScope == ScanScope.Unused)
+            {
+                unusedAssetTypeFilter = previousUnusedAssetTypeFilter;
+            }
         }
     }
     
@@ -1380,14 +1393,17 @@ public class TAAssetCheckerWindow : EditorWindow
         AssetDatabase.Refresh();
     }
 
-    private void FixResultWithRollback(CheckResult result, FixRollbackGroup rollbackGroup)
+    private void FixResultWithRollback(
+        CheckResult result,
+        FixRollbackGroup rollbackGroup,
+        bool showConfirmation = true)
     {
         if (result == null || result.rule == null || !result.canFix)
             return;
 
         FixRollbackRecord record = CreateRollbackRecordBeforeFix(result);
 
-        result.rule.Fix(result.assetPath);
+        result.rule.Fix(result.assetPath, showConfirmation);
 
         CompleteRollbackRecordAfterFix(record);
 
@@ -1795,7 +1811,7 @@ public class TAAssetCheckerWindow : EditorWindow
 
         foreach (CheckResult result in results)
         {
-            if (!result.passed && result.canFix)
+            if (!result.passed && result.canFix && ShouldShowResult(result))
             {
                 fixableResults.Add(result);
             }
@@ -1803,23 +1819,39 @@ public class TAAssetCheckerWindow : EditorWindow
 
         if (fixableResults.Count == 0)
         {
-            Debug.Log("TA Asset Checker: 没有可修复的失败项。");
+            Debug.Log("TA Asset Checker: 当前页面没有可修复的失败项。");
             return;
         }
 
-        bool confirm = EditorUtility.DisplayDialog(
-            "Fix All Failed",
-            $"即将修复 {fixableResults.Count} 个失败检测项。\n\n是否继续？",
-            "继续修复",
-            "取消"
-        );
+        string currentFilterName = GetRuleFilterDisplayName(ruleDetailFilter);
+        bool isNamingOnlyBatch = true;
 
-        if (!confirm)
-            return;
+        for (int i = 0; i < fixableResults.Count; i++)
+        {
+            if (!(fixableResults[i].rule is AssetNamePrefixRule))
+            {
+                isNamingOnlyBatch = false;
+                break;
+            }
+        }
+
+        // 用户点击批量命名修复后直接执行；单项命名修复仍由规则自身弹窗确认。
+        if (!isNamingOnlyBatch)
+        {
+            bool confirm = EditorUtility.DisplayDialog(
+                "修复当前页面失败项",
+                $"即将修复当前筛选“{currentFilterName}”下的 {fixableResults.Count} 个失败检测项。\n\n是否继续？",
+                "继续修复",
+                "取消"
+            );
+
+            if (!confirm)
+                return;
+        }
 
         FixRollbackGroup rollbackGroup = new FixRollbackGroup
         {
-            title = "Fix All Failed"
+            title = $"修复当前页面失败项 - {currentFilterName}"
         };
 
         try
@@ -1834,7 +1866,7 @@ public class TAAssetCheckerWindow : EditorWindow
                     (float)i / fixableResults.Count
                 );
 
-                FixResultWithRollback(result, rollbackGroup);
+                FixResultWithRollback(result, rollbackGroup, false);
             }
         }
         finally
@@ -1849,14 +1881,7 @@ public class TAAssetCheckerWindow : EditorWindow
 
         RefreshLastScan();
 
-        Debug.Log($"TA Asset Checker: 已批量修复 {fixableResults.Count} 个失败检测项。");
-
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-
-        RefreshLastScan();
-
-        Debug.Log($"TA Asset Checker: 已批量修复 {fixableResults.Count} 个失败检测项。");
+        Debug.Log($"TA Asset Checker: 已批量修复当前页面的 {fixableResults.Count} 个失败检测项。");
     }
 
     private void SelectScanFolder()

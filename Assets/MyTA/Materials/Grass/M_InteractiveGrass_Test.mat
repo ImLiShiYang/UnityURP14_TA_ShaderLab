@@ -154,12 +154,12 @@ Material:
     - _BaseColor: {r: 0.18, g: 0.55, b: 0.08, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _GrassBendDirWS: {r: -0.65904766, g: 0, b: -0.7521012, a: 0}
+    - _GrassBendDirWS: {r: -0.35347575, g: 0, b: 0.9354437, a: 0}
     - _GrassHeightAxisOS: {r: 0, g: 0, b: 1, a: 0}
-    - _GrassInteractionRect: {r: 196.27875, g: 107.115, b: 212.27875, a: 123.115}
+    - _GrassInteractionRect: {r: 186.64626, g: 106.3025, b: 202.64626, a: 122.3025}
     - _GroundColor: {r: 0.05, g: 0.12, b: 0.03, a: 1}
-    - _PressCenter0WS: {r: 204.38922, g: 4.7302213, b: 114.98274, a: 0}
-    - _PressCenter1WS: {r: 204.0841, g: 4.7575674, b: 115.402084, a: 0}
+    - _PressCenter0WS: {r: 194.33133, g: 6.0711117, b: 114.301056, a: 0}
+    - _PressCenter1WS: {r: 194.84717, g: 6.0596404, b: 114.36011, a: 0}
     - _PressCenterWS: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _TipColor: {r: 0.45, g: 1, b: 0.08, a: 1}

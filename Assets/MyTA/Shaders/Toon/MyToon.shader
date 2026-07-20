@@ -36,8 +36,11 @@
         _FringeShadowDistance ("刘海投影偏移", Range(-0.2, 0.2)) = 0.035
         _FringeShadowStrength ("刘海投影强度", Range(0, 1)) = 0.55
         _FringeShadowDepthBias ("刘海深度偏移", Range(-0.05, 0.05)) = 0.01
+        _FringeShadowMaxDepthGap ("刘海与脸最大深度差", Range(0.01, 0.3)) = 0.12
+        _FringeShadowLowerBoundary ("刘海阴影下边界", Range(0, 1)) = 0.43
+        _FringeShadowBoundarySoftness ("刘海阴影边界柔和度", Range(0.001, 0.25)) = 0.08
         _FringeShadowColorStrength ("刘海阴影颜色强度", Range(0, 1)) = 0.45
-        _FringeShadowCameraFadeDistance ("刘海远处淡出距离", Range(0.1, 20)) = 5
+        _FringeShadowCameraFadeDistance ("刘海阴影关闭距离", Range(0.1, 20)) = 3
 
         [Header(Toon Ramp)]
         [Toggle]_UseToonRamp ("启用 Toon Ramp", Float) = 0
@@ -330,6 +333,8 @@
                         input.positionCS,
                         input.positionSS,
                         input.posNDCw,
+                        input.positionWS,
+                        input.uv,
                         lightDirWS
                     );
                     fringeShadow = lerp(1.0, 1.0 - _FringeShadowStrength, fringeShadowMask);

@@ -26,9 +26,8 @@ public class TextureMaxSizeRule : AssetCheckRule
 
         int width = texture.width;
         int height = texture.height;
-        int largestSize = Mathf.Max(width, height);
 
-        bool passed = largestSize <= maxSize;
+        bool passed = importer.maxTextureSize <= maxSize;
 
         CheckResult result = new CheckResult
         {
@@ -36,8 +35,8 @@ public class TextureMaxSizeRule : AssetCheckRule
             assetType = "Texture2D",
 
             ruleName = RuleName,
-            currentValue = $"{width} x {height}",
-            limitValue = $"最大边 <= {maxSize}",
+            currentValue = $"导入上限：{importer.maxTextureSize}（实际：{width} x {height}）",
+            limitValue = $"Max Size <= {maxSize}",
             passed = passed,
 
             canFix = !passed && CanFix(assetPath),
@@ -46,11 +45,12 @@ public class TextureMaxSizeRule : AssetCheckRule
 
         if (passed)
         {
-            result.message = "贴图尺寸符合要求。";
+            result.message = "贴图导入 Max Size 设置符合要求。";
         }
         else
         {
-            result.message = $"贴图尺寸超过限制。当前最大边为 {largestSize}，限制为 {maxSize}。";
+            result.message =
+                $"贴图导入 Max Size 设置超过限制。当前设置为 {importer.maxTextureSize}，限制为 {maxSize}。";
         }
 
         return result;

@@ -109,6 +109,11 @@ public class AssetNamePrefixRule : AssetCheckRule
 
     public override void Fix(string assetPath)
     {
+        Fix(assetPath, true);
+    }
+
+    public override void Fix(string assetPath, bool showConfirmation)
+    {
         if (!CanFix(assetPath))
         {
             Debug.LogWarning($"命名规则无法自动修复：{assetPath}");
@@ -118,49 +123,51 @@ public class AssetNamePrefixRule : AssetCheckRule
         string oldName = Path.GetFileNameWithoutExtension(assetPath);
         string newName = GetSuggestedName(oldName);
 
-        // 点击修复时再做引用风险扫描。
-        List<string> codeReferenceFiles = FindCodeReferenceFiles(assetPath, oldName, MaxReferenceFilesToShow);
-
-        StringBuilder dialogMessage = new StringBuilder();
-
-        dialogMessage.AppendLine("即将重命名资源：");
-        dialogMessage.AppendLine(assetPath);
-        dialogMessage.AppendLine();
-        dialogMessage.AppendLine($"新名称：{newName}");
-        dialogMessage.AppendLine();
-
-        if (codeReferenceFiles.Count > 0)
+        if (showConfirmation)
         {
-            dialogMessage.AppendLine("警告：在以下代码/文本文件中发现旧名称或旧路径引用：");
+            // 单项修复时再做引用风险扫描，并由用户确认。
+            List<string> codeReferenceFiles = FindCodeReferenceFiles(assetPath, oldName, MaxReferenceFilesToShow);
+            StringBuilder dialogMessage = new StringBuilder();
 
-            foreach (string file in codeReferenceFiles)
+            dialogMessage.AppendLine("即将重命名资源：");
+            dialogMessage.AppendLine(assetPath);
+            dialogMessage.AppendLine();
+            dialogMessage.AppendLine($"新名称：{newName}");
+            dialogMessage.AppendLine();
+
+            if (codeReferenceFiles.Count > 0)
             {
-                dialogMessage.AppendLine(file);
+                dialogMessage.AppendLine("警告：在以下代码/文本文件中发现旧名称或旧路径引用：");
+
+                foreach (string file in codeReferenceFiles)
+                {
+                    dialogMessage.AppendLine(file);
+                }
+
+                dialogMessage.AppendLine();
+                dialogMessage.AppendLine("这些引用不会自动修改。");
+                dialogMessage.AppendLine("如果代码里写死了旧名字，重命名后可能需要手动同步修改。");
+                dialogMessage.AppendLine();
+            }
+            else
+            {
+                dialogMessage.AppendLine("没有在常见代码文件中发现旧名称或旧路径引用。");
+                dialogMessage.AppendLine();
             }
 
-            dialogMessage.AppendLine();
-            dialogMessage.AppendLine("这些引用不会自动修改。");
-            dialogMessage.AppendLine("如果代码里写死了旧名字，重命名后可能需要手动同步修改。");
-            dialogMessage.AppendLine();
+            dialogMessage.AppendLine("Unity 的普通拖拽引用通常依赖 GUID，一般不会因为改名断开。");
+            dialogMessage.AppendLine("是否继续重命名？");
+
+            bool confirm = EditorUtility.DisplayDialog(
+                "重命名资源",
+                dialogMessage.ToString(),
+                "继续重命名",
+                "取消"
+            );
+
+            if (!confirm)
+                return;
         }
-        else
-        {
-            dialogMessage.AppendLine("没有在常见代码文件中发现旧名称或旧路径引用。");
-            dialogMessage.AppendLine();
-        }
-
-        dialogMessage.AppendLine("Unity 的普通拖拽引用通常依赖 GUID，一般不会因为改名断开。");
-        dialogMessage.AppendLine("是否继续重命名？");
-
-        bool confirm = EditorUtility.DisplayDialog(
-            "重命名资源",
-            dialogMessage.ToString(),
-            "继续重命名",
-            "取消"
-        );
-
-        if (!confirm)
-            return;
 
         string error = AssetDatabase.RenameAsset(assetPath, newName);
 
@@ -253,7 +260,7 @@ public class AssetNamePrefixRule : AssetCheckRule
         {
             builder.AppendLine("引用风险：");
             builder.AppendLine("为了提升扫描速度，当前扫描阶段没有检查代码引用。");
-            builder.AppendLine("点击“修复”时会再次扫描常见代码文件，并在确认弹窗里提示风险。");
+            builder.AppendLine("单项点击“修复”时会再次扫描常见代码文件，并在确认弹窗里提示风险。");
         }
         else if (codeReferenceFiles.Count > 0)
         {

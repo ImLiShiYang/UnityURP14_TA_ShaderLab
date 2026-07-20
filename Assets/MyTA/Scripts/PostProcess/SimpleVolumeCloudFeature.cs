@@ -131,6 +131,11 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
 
         private static readonly int TemporalMinBlendOnCloudChangeId =
             Shader.PropertyToID("_TemporalMinBlendOnCloudChange");
+        
+        private static readonly int TemporalFrameIndexId =
+            Shader.PropertyToID("_TemporalFrameIndex");
+
+        private const int TemporalJitterSequenceLength = 16;
 
         private readonly Settings settings;
         private readonly ProfilingSampler profilingSampler = new ProfilingSampler("Simple Volume Cloud");
@@ -150,6 +155,7 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
         private int verticalBlurPass = -1;
         private int temporalBlendPass = -1;
         private int compositePass = -1;
+        private int temporalFrameIndex;
 
         private bool historyValid;
         private int historyCameraId = -1;
@@ -273,6 +279,8 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
             if (historyWidth != cloudDescriptor.width || historyHeight != cloudDescriptor.height)
             {
                 historyValid = false;
+                temporalFrameIndex = 0;
+                
                 historyWidth = cloudDescriptor.width;
                 historyHeight = cloudDescriptor.height;
             }
@@ -332,6 +340,12 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
 
                 cmd.SetGlobalTexture(DownsampledCloudDepthTextureId, downsampledDepthTexture);
 
+                material.SetFloat(
+                    TemporalFrameIndexId,
+                    settings.enableTemporalAccumulation ? temporalFrameIndex : 0
+                );
+
+                
                 // 2. 渲染体积云。
                 // 这里输出的不是普通颜色，而是：
                 // rgb = 云累积颜色
@@ -404,10 +418,14 @@ public class SimpleVolumeCloudFeature : ScriptableRendererFeature
                     );
 
                     UpdateHistoryCamera(ref renderingData);
+                    
+                    temporalFrameIndex =
+                        (temporalFrameIndex + 1) % TemporalJitterSequenceLength;
                 }
                 else
                 {
                     historyValid = false;
+                    temporalFrameIndex = 0;
                 }
 
                 // 4. 这里暂时仍然设置到 _VolumeCloudTexture。

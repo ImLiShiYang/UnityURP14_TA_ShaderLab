@@ -323,6 +323,8 @@ float GetFringeShadowMask(
     float4 positionCS,
     float4 positionSS,
     float posNDCw,
+    float3 positionWS,
+    float2 uv,
     float3 lightDirWS
 )
 {
@@ -334,19 +336,18 @@ float GetFringeShadowMask(
     float rawDepth = positionCS.z;
     float faceEyeDepth = LinearEyeDepth(rawDepth, _ZBufferParams);
 
-    float3 viewLightDir = normalize(TransformWorldToViewDir(lightDirWS));
+    // 将脸部像素沿光照方向移动一小段世界距离，再投影回屏幕。
+    // 这样偏移会随透视距离自然缩小；不能直接使用固定屏幕 UV 偏移，
+    // 否则角色变远、脸部像素变少后，同样的偏移会覆盖整张脸。
+    float3 offsetPositionWS = positionWS + normalize(lightDirWS) * _FringeShadowDistance;
+    float4 offsetPositionCS = TransformWorldToHClip(offsetPositionWS);
+    float4 offsetPositionSS = ComputeScreenPos(offsetPositionCS);
+    float2 projectedUV = offsetPositionSS.xy / max(offsetPositionSS.w, 0.0001);
 
-    // 屏幕空间偏移方向。这里保留 xy 长度：
-    // 光越接近正对摄像机，xy 越小，刘海投影偏移也越小。
-    float2 offsetDir = viewLightDir.xy;
-
-    // 近距离修正，参考原项目的 NDC.w 思路。
-    float nearFix = 1.0 / max(min(posNDCw, 1.0), 0.0001);
-
-    // 远处淡出，避免角色离镜头太远时阴影飘得很夸张。
-    float farFade = min(1.0, _FringeShadowCameraFadeDistance / max(faceEyeDepth, 0.0001));
-
-    float2 sampleUV = screenUV + offsetDir * _FringeShadowDistance * nearFix * farFade;
+    // 距离内完整开启，超过设置距离后立即关闭，不做中间渐变。
+    float cutoffDistance = max(_FringeShadowCameraFadeDistance, 0.0001);
+    float distanceVisible = 1.0 - step(cutoffDistance, faceEyeDepth);
+    float2 sampleUV = projectedUV;
 
     if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0)
         return 0.0;
@@ -362,20 +363,48 @@ float GetFringeShadowMask(
 
     float hairEyeDepth = LinearEyeDepth(hairRawDepth, _ZBufferParams);
 
-    // hairEyeDepth 比 faceEyeDepth 小，说明头发更靠近摄像机，可能挡住脸。
-    float depthPass = step(hairEyeDepth - _FringeShadowDepthBias, faceEyeDepth);
+    // 只有紧贴脸部前方的头发才允许投影。旧逻辑只判断“头发在脸前”，
+    // 会把侧发、后发等离脸较远的深度也当作刘海，导致整张脸变暗。
+    float depthGap = faceEyeDepth - hairEyeDepth;
+    float depthSoftness = clamp(
+        fwidth(faceEyeDepth) + fwidth(hairEyeDepth),
+        0.0005,
+        0.01
+    );
+    float frontPass = smoothstep(
+        -_FringeShadowDepthBias - depthSoftness,
+        -_FringeShadowDepthBias + depthSoftness,
+        depthGap
+    );
+    float maxDepthGap = max(_FringeShadowMaxDepthGap, 0.01);
+    float proximityPass = 1.0 - smoothstep(
+        maxDepthGap - depthSoftness,
+        maxDepthGap + depthSoftness,
+        depthGap
+    );
 
-    return hasHair * depthPass;
+    // 刘海只应影响上半脸。即使远处头发与脸落入同一像素，
+    // 也不会再把鼻子、嘴和下巴一起压暗。
+    float boundarySoftness = max(_FringeShadowBoundarySoftness, 0.001);
+    float upperFaceMask = smoothstep(
+        _FringeShadowLowerBoundary - boundarySoftness,
+        _FringeShadowLowerBoundary + boundarySoftness,
+        uv.y
+    );
+
+    return hasHair * frontPass * proximityPass * upperFaceMask * distanceVisible;
 }
 
 float GetFringeShadow(
     float4 positionCS,
     float4 positionSS,
     float posNDCw,
+    float3 positionWS,
+    float2 uv,
     float3 lightDirWS
 )
 {
-    float shadowMask = GetFringeShadowMask(positionCS, positionSS, posNDCw, lightDirWS);
+    float shadowMask = GetFringeShadowMask(positionCS, positionSS, posNDCw, positionWS, uv, lightDirWS);
 
     // 返回值：1 = 不受刘海影响；越小 = 越暗。
     return lerp(1.0, 1.0 - _FringeShadowStrength, shadowMask);
@@ -439,9 +468,12 @@ float GetFaceSDFLight(float2 uv, float3 normalWS,float3 lightDirWS)
 
     // 原版是 step(ctrl, ilm)
     // 为了保留你的柔边，用 smoothstep 做软过渡
+    // 至少保留一个像素足迹宽度的过渡。否则材质把 softness 调得很小时，
+    // SDF 会随着相机距离改变采样覆盖范围，并在明暗阈值两侧反复跳变。
+    float sdfSoftness = max(_FaceSDFShadowSoftness, fwidth(ilm));
     float sdfLit = smoothstep(
-        ctrl - _FaceSDFShadowSoftness,
-        ctrl + _FaceSDFShadowSoftness,
+        ctrl - sdfSoftness,
+        ctrl + sdfSoftness,
         ilm
     );
     

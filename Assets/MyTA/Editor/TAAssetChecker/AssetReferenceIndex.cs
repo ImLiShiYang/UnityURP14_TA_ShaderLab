@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class AssetReferenceIndex
 {
@@ -23,16 +25,19 @@ public class AssetReferenceIndex
     {
         AssetReferenceIndex index = new AssetReferenceIndex();
 
-        // 先明确扫描所有 Scene。
-        // index.BuildSceneReferences();
+        // 扫描项目 Assets 下的所有场景，包括当前没有打开的场景。
+        index.BuildAllSceneAssetReferences();
 
-        // 再扫描其他常见资源。
+        // 再读取已打开场景的内存对象，覆盖未保存修改和未激活对象中的引用。
+        index.BuildOpenSceneReferences();
+
+        // 最后扫描 Prefab 和其他常见资源。
         index.BuildAssetReferences();
 
         return index;
     }
 
-    private void BuildSceneReferences()
+    private void BuildAllSceneAssetReferences()
     {
         string[] sceneGuids = AssetDatabase.FindAssets("t:Scene", new[] { "Assets" });
 
@@ -42,15 +47,11 @@ public class AssetReferenceIndex
             {
                 string scenePath = AssetDatabase.GUIDToAssetPath(sceneGuids[i]);
 
-                // 进度条不需要每个资源都更新，否则编辑器 UI 刷新本身也会产生开销。
-                if (i == 0 || i % 25 == 0 || i == sceneGuids.Length - 1)
-                {
-                    EditorUtility.DisplayProgressBar(
-                        "Building Asset Reference Index",
-                        scenePath,
-                        sceneGuids.Length > 0 ? (float)i / sceneGuids.Length : 1f
-                    );
-                }
+                EditorUtility.DisplayProgressBar(
+                    "Scanning All Scene References",
+                    scenePath,
+                    sceneGuids.Length > 0 ? (float)i / sceneGuids.Length : 1f
+                );
 
                 if (string.IsNullOrEmpty(scenePath))
                     continue;
@@ -64,6 +65,62 @@ public class AssetReferenceIndex
         finally
         {
             EditorUtility.ClearProgressBar();
+        }
+    }
+
+    private void BuildOpenSceneReferences()
+    {
+        for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
+        {
+            Scene scene = SceneManager.GetSceneAt(sceneIndex);
+
+            if (!scene.IsValid() || !scene.isLoaded)
+                continue;
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            Object[] rootObjects = new Object[roots.Length];
+
+            for (int i = 0; i < roots.Length; i++)
+            {
+                rootObjects[i] = roots[i];
+            }
+
+            Object[] dependencies;
+
+            try
+            {
+                dependencies = EditorUtility.CollectDependencies(rootObjects);
+            }
+            catch
+            {
+                continue;
+            }
+
+            string referencer = string.IsNullOrEmpty(scene.path)
+                ? $"当前场景：{scene.name}"
+                : scene.path;
+
+            foreach (Object dependency in dependencies)
+            {
+                if (dependency == null)
+                    continue;
+
+                string dependencyPath = AssetDatabase.GetAssetPath(dependency);
+
+                if (string.IsNullOrEmpty(dependencyPath))
+                    continue;
+
+                if (!dependencyPath.StartsWith("Assets/"))
+                    continue;
+
+                if (dependencyPath == scene.path)
+                    continue;
+
+                if (IsInTrashFolder(dependencyPath))
+                    continue;
+
+                AddReference(dependencyPath, referencer);
+            }
         }
     }
 
@@ -87,6 +144,10 @@ public class AssetReferenceIndex
                     continue;
 
                 if (IsInTrashFolder(rootPath))
+                    continue;
+
+                // 场景已经由 BuildAllSceneAssetReferences 统一扫描，避免重复处理。
+                if (Path.GetExtension(rootPath).ToLower() == ".unity")
                     continue;
 
                 if (!IsDependencyRootFile(rootPath))

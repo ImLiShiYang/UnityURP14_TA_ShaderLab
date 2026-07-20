@@ -37,6 +37,9 @@ float _IsFringeShadowCaster;
 float _FringeShadowDistance;
 float _FringeShadowStrength;
 float _FringeShadowDepthBias;
+float _FringeShadowMaxDepthGap;
+float _FringeShadowLowerBoundary;
+float _FringeShadowBoundarySoftness;
 float _FringeShadowColorStrength;
 float _FringeShadowCameraFadeDistance;
 

@@ -101,17 +101,17 @@ Material:
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
-    - _CloudAmbient: 0.25
-    - _CloudBottomDarkness: 0.26
-    - _CloudCoverage: 0.493
-    - _CloudDensity: 0.45
+    - _CloudAmbient: 0.437
+    - _CloudBottomDarkness: 0.507
+    - _CloudCoverage: 0.522
+    - _CloudDensity: 2.31
     - _CloudMapScale: 0.008
     - _CloudMapStrength: 0.924
-    - _CloudScale: 0.015
+    - _CloudScale: 0.01
     - _CloudShadowHeight: 55
-    - _CloudShadowSoftness: 0.25
-    - _CloudShadowStrength: 0.181
-    - _CloudShadowThreshold: 0.35
+    - _CloudShadowSoftness: 0.159
+    - _CloudShadowStrength: 1
+    - _CloudShadowThreshold: 0.428
     - _Cull: 2
     - _Cutoff: 0.5
     - _DebugMode: 0
@@ -119,11 +119,11 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EdgeFalloff: 0.25
+    - _EdgeFalloff: 0.664
     - _EnvironmentReflections: 1
-    - _ErosionNoiseScale: 4
-    - _ErosionStrength: 0.25
-    - _ExtinctionCoeff: 0.25
+    - _ErosionNoiseScale: 4.56
+    - _ErosionStrength: 0.275
+    - _ExtinctionCoeff: 0.66
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
@@ -131,27 +131,27 @@ Material:
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
-    - _PhaseG: 0.35
+    - _PhaseG: -0.052
     - _PowderStrength: 0.115
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _SilverLiningPower: 18.8
-    - _SilverLiningStrength: 0
+    - _SilverLiningPower: 22.7
+    - _SilverLiningStrength: 2.31
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
-    - _StepCount: 24
-    - _StepJitter: 0.5
-    - _SunIntensity: 0.85
+    - _StepCount: 8
+    - _StepJitter: 1
+    - _SunIntensity: 1.22
     - _Surface: 0
-    - _TemporalBlendFactor: 0.75
-    - _TemporalCloudChangeThreshold: 0.35
+    - _TemporalBlendFactor: 0.8
+    - _TemporalCloudChangeThreshold: 0.453
     - _TemporalDepthThreshold: 2
-    - _TemporalMinBlendOnCloudChange: 0.1
+    - _TemporalMinBlendOnCloudChange: 0.116
     - _UpsampleDepthThreshold: 0.01
-    - _WindSpeed: 3.45
+    - _WindSpeed: 1.42
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
@@ -163,7 +163,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
-    - _WindDirection: {r: 1, g: 0, b: 0, a: 0}
+    - _WindDirection: {r: 1, g: 0, b: 1, a: 0}
   m_BuildTextureStacks: []
 --- !u!114 &8356642228660593870
 MonoBehaviour:

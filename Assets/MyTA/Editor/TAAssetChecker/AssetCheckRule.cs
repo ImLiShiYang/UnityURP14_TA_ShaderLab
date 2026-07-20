@@ -15,4 +15,9 @@ public abstract class AssetCheckRule
     {
         Debug.LogWarning($"规则 {RuleName} 不支持自动修复：{assetPath}");
     }
+
+    public virtual void Fix(string assetPath, bool showConfirmation)
+    {
+        Fix(assetPath);
+    }
 }

@@ -30,7 +30,6 @@ Shader "MyTA/Volumetric/SimpleRayMarchFogV2"
 
         [Header(Light)]
         _LightScatter ("Light Scatter", Range(0, 3)) = 1
-        _LightPower ("Light Power", Range(1, 16)) = 6
         _Anisotropy ("Anisotropy", Range(-0.85, 0.85)) = 0.45
         _VolumeLightIntensity ("Volume Light Intensity", Range(0, 5)) = 1.5
         _AmbientFog ("Ambient Fog", Range(0, 1)) = 0.15
@@ -104,7 +103,6 @@ Shader "MyTA/Volumetric/SimpleRayMarchFogV2"
             float _HeightFalloff;
 
             float _LightScatter;
-            float _LightPower;
             float _Anisotropy;
             float _VolumeLightIntensity;
             float _AmbientFog;
