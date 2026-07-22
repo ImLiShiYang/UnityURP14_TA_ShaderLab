@@ -38,8 +38,10 @@ public class WaterRippleTextureDebugBinder : MonoBehaviour
         if (waterRippleViewer == null)
             return;
 
-        waterRippleViewer.SetTexture(GetWaterRippleTexture());
-        waterRippleViewer.SetTitle("Water Ripple / " + source);
+        waterRippleViewer.SetSourceTexture(
+            WaterRippleTextureDebugUI.TextureSource.WaterRipple,
+            GetWaterRippleTexture(),
+            "Water Ripple / " + source);
     }
 
     private Texture GetWaterRippleTexture()

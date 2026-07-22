@@ -86,7 +86,7 @@ Material:
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
     - _BumpScale: 1
-    - _CenterWidth: 0.45
+    - _CenterWidth: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _Cull: 2
@@ -96,20 +96,20 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EdgeWidth: 0.78
+    - _EdgeWidth: 0.483
     - _EnvironmentReflections: 1
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
-    - _LengthSoftness: 0.25
+    - _LengthSoftness: 0.706
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _OuterSoftness: 0.25
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _RimStrength: 0.16
-    - _SinkStrength: 0.823
+    - _RimStrength: 0.246
+    - _SinkStrength: 1
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1

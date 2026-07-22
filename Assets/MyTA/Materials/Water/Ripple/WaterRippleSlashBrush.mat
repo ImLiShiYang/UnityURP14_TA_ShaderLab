@@ -33,14 +33,14 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _CutStrength: -0.62
-    - _CutWidth: 0.09
-    - _EdgeSoftness: 0.035
+    - _CutStrength: -0.903
+    - _CutWidth: 0.084
+    - _EdgeSoftness: 0.0863
     - _HeightStrength: 1.4
     - _InvertHeight: 0
-    - _LengthSoftness: 0.16
+    - _LengthSoftness: 0.277
     - _NormalStrength: 2.2
-    - _SideLiftStrength: 0.22
-    - _SideWidth: 0.18
+    - _SideLiftStrength: 0.736
+    - _SideWidth: 0.217
     m_Colors: []
   m_BuildTextureStacks: []

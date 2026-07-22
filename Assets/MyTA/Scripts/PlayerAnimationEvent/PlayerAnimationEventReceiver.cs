@@ -245,6 +245,24 @@ public class PlayerAnimationEventReceiver : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Compatibility entry point used by the existing walking/running clips.
+    /// Route it through the shared footstep path so snow, grass and water
+    /// systems all receive the same left-foot event.
+    /// </summary>
+    public void SpawnLeftGrassBrush()
+    {
+        SpawnLeftFootprint();
+    }
+
+    /// <summary>
+    /// Compatibility entry point used by the existing walking/running clips.
+    /// </summary>
+    public void SpawnRightGrassBrush()
+    {
+        SpawnRightFootprint();
+    }
+
 
     // ============================================================
     // Weapon Animation Events

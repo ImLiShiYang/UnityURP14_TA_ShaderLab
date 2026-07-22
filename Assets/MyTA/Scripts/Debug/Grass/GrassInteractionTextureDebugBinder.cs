@@ -49,8 +49,10 @@ public class GrassInteractionTextureDebugBinder : MonoBehaviour
 
         Texture texture = GetGrassInteractionTexture();
 
-        viewer.SetTexture(texture);
-        viewer.SetTitle("Grass Interaction / " + source);
+        viewer.SetSourceTexture(
+            WaterRippleTextureDebugUI.TextureSource.GrassInteraction,
+            texture,
+            "Grass Interaction / " + source);
     }
 
     private Texture GetGrassInteractionTexture()

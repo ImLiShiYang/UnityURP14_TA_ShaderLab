@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Profiling;
 using UnityEngine.Rendering;
 
 /// <summary>
@@ -186,6 +187,10 @@ public class InstancedGrassRenderer : MonoBehaviour
     [Tooltip("分帧生成时，每帧最多尝试多少次 Raycast。用于避免地面检测失败太多时仍然卡顿。")]
     [Min(1)]
     public int grassGenerationAttemptsPerFrameBudget = 8000;
+
+    [Tooltip("分帧生成每帧允许占用的 CPU 毫秒数。大于 0 时会与数量预算同时生效；建议先用 2 ms 分析。")]
+    [Min(0f)]
+    public float chunkGenerationMillisecondsPerFrameBudget = 2f;
 
     [Tooltip("分帧生成时，每帧最多完成多少个 Chunk 的最终 buffer 构建。")]
     [Min(1)]
@@ -419,7 +424,22 @@ public class InstancedGrassRenderer : MonoBehaviour
     private int lastChunkBuildCompletedChunks;
     private int lastChunkBuildGeneratedInstances;
     private int lastChunkBuildAttempts;
+    private int lastChunkBuildPlacementRaycasts;
+    private int lastChunkBuildWaterRaycasts;
+    private int lastChunkBuildAcceptedPlacements;
+    private bool lastChunkBuildHitTimeBudget;
     private float lastChunkBuildMs;
+
+    private static readonly ProfilerMarker InfiniteLoadingMarker =
+        new ProfilerMarker("Grass.UpdateInfiniteChunks");
+    private static readonly ProfilerMarker ChunkBuildMarker =
+        new ProfilerMarker("Grass.ProcessChunkBuildQueue");
+    private static readonly ProfilerMarker PlacementSamplingMarker =
+        new ProfilerMarker("Grass.Build.SamplePlacement");
+    private static readonly ProfilerMarker FinishChunkMarker =
+        new ProfilerMarker("Grass.Build.FinishChunk");
+    private static readonly ProfilerMarker DrawMarker =
+        new ProfilerMarker("Grass.Draw");
 
     public int GeneratedCount => generatedCount;
     public int DrawCallCount => drawCallCount;
@@ -470,15 +490,20 @@ public class InstancedGrassRenderer : MonoBehaviour
         if (enableInfiniteLoading && Time.time >= nextInfiniteUpdateTime)
         {
             nextInfiniteUpdateTime = Time.time + infiniteUpdateInterval;
-            UpdateInfiniteChunks(false);
+            using (InfiniteLoadingMarker.Auto())
+                UpdateInfiniteChunks(false);
         }
 
         // DrawMeshInstanced 不是 Renderer 组件，
         // 所以需要每帧主动调用一次绘制。
         if (enableInfiniteLoading && enableTimeSlicedChunkGeneration)
-            ProcessChunkBuildQueue(false);
+        {
+            using (ChunkBuildMarker.Auto())
+                ProcessChunkBuildQueue(false);
+        }
 
-        DrawGrass();
+        using (DrawMarker.Auto())
+            DrawGrass();
     }
 
     private void OnValidate()
@@ -594,6 +619,10 @@ public class InstancedGrassRenderer : MonoBehaviour
         lastChunkBuildCompletedChunks = 0;
         lastChunkBuildGeneratedInstances = 0;
         lastChunkBuildAttempts = 0;
+        lastChunkBuildPlacementRaycasts = 0;
+        lastChunkBuildWaterRaycasts = 0;
+        lastChunkBuildAcceptedPlacements = 0;
+        lastChunkBuildHitTimeBudget = false;
         lastChunkBuildMs = 0f;
 
         if (target == null)
@@ -620,12 +649,6 @@ public class InstancedGrassRenderer : MonoBehaviour
         if (enableInfiniteLoading)
         {
             UpdateInfiniteChunks(true);
-
-            // Debug.Log(
-            //     $"[InstancedGrassRenderer] Infinite mode generated {GeneratedCount} grass instances, chunks={ChunkCount}, drawCalls={DrawCallCount}.",
-            //     this
-            // );
-
             return;
         }
 
@@ -761,7 +784,9 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         if (activeChunkBuildJob != null && !desiredChunkCoords.Contains(activeChunkBuildJob.coord))
-            activeChunkBuildJob = null;
+        {
+            CancelActiveChunkBuildJob();
+        }
 
         PruneChunkBuildQueue();
 
@@ -800,9 +825,20 @@ public class InstancedGrassRenderer : MonoBehaviour
                 if (desiredLod >= chunk.densityLodLevel)
                     continue;
 
-                // 当前 Chunk 离玩家变近了，需要用更高密度重新生成。
-                // RebuildChunk 会先清空旧草，再按 desiredLod 的密度重新生成。
-                generatedInstancesThisUpdate += RebuildChunk(chunk, desiredLod);
+                // LOD 升级也必须服从分帧预算。旧 Chunk 会继续显示，
+                // 新 Chunk 在后台生成完毕后再原子替换，避免重建期间出现空洞。
+                if (enableTimeSlicedChunkGeneration)
+                {
+                    if (IsChunkBuildPending(coord))
+                        continue;
+
+                    EnqueueChunkBuild(coord, desiredLod, true);
+                    queuedThisUpdate++;
+                }
+                else
+                {
+                    generatedInstancesThisUpdate += RebuildChunk(chunk, desiredLod);
+                }
 
                 // 记录本次无限加载更新中升级了多少个 Chunk，
                 // 主要用于限制单帧开销和 Debug 面板显示。
@@ -857,10 +893,32 @@ public class InstancedGrassRenderer : MonoBehaviour
         lastQueuedChunks = queuedThisUpdate;
     }
 
-    private void EnqueueChunkBuild(Vector2Int coord, DensityLodLevel lodLevel)
+    private void EnqueueChunkBuild(
+        Vector2Int coord,
+        DensityLodLevel lodLevel,
+        bool isLodUpgrade = false)
     {
-        chunkBuildQueue.Enqueue(new ChunkBuildJob(coord, lodLevel));
+        chunkBuildQueue.Enqueue(new ChunkBuildJob(coord, lodLevel, isLodUpgrade));
         queuedChunkCoords.Add(coord);
+    }
+
+    private bool IsChunkBuildPending(Vector2Int coord)
+    {
+        return queuedChunkCoords.Contains(coord) ||
+               (activeChunkBuildJob != null && activeChunkBuildJob.coord == coord);
+    }
+
+    private bool IsChunkBuildJobStillNeeded(ChunkBuildJob job)
+    {
+        if (job == null || !desiredChunkCoords.Contains(job.coord))
+            return false;
+
+        if (!job.isLodUpgrade)
+            return !chunks.ContainsKey(job.coord);
+
+        return chunks.TryGetValue(job.coord, out GrassChunk currentChunk) &&
+               currentChunk.IsReadyForRendering &&
+               job.lodLevel < currentChunk.densityLodLevel;
     }
 
     /// <summary>
@@ -896,7 +954,7 @@ public class InstancedGrassRenderer : MonoBehaviour
             // 如果这个 Chunk 已经不在当前需要加载的范围内，
             // 或者它已经被生成进 chunks 字典里，
             // 那这个任务就过期了，直接丢弃。
-            if (!desiredChunkCoords.Contains(job.coord) || chunks.ContainsKey(job.coord))
+            if (!IsChunkBuildJobStillNeeded(job))
             {
                 queuedChunkCoords.Remove(job.coord);
                 continue;
@@ -914,6 +972,13 @@ public class InstancedGrassRenderer : MonoBehaviour
             return;
 
         float updateStartTime = Time.realtimeSinceStartup;
+        bool useTimeBudget = !finishAll && chunkGenerationMillisecondsPerFrameBudget > 0f;
+        float timeBudgetDeadline = updateStartTime + chunkGenerationMillisecondsPerFrameBudget * 0.001f;
+
+        lastChunkBuildPlacementRaycasts = 0;
+        lastChunkBuildWaterRaycasts = 0;
+        lastChunkBuildAcceptedPlacements = 0;
+        lastChunkBuildHitTimeBudget = false;
 
         // finishAll 为 true 时不限制预算，通常用于需要一次性补完的情况。
         // 否则每帧只生成有限数量，避免移动时卡顿。
@@ -941,7 +1006,16 @@ public class InstancedGrassRenderer : MonoBehaviour
             int attemptsBefore = activeChunkBuildJob.attemptCount;
 
             // 继续生成当前 Chunk 的草，会消耗生成数量预算和 Raycast 尝试预算。
-            ContinueChunkBuildJob(activeChunkBuildJob, ref generatedBudget, ref attemptBudget);
+            using (PlacementSamplingMarker.Auto())
+            {
+                ContinueChunkBuildJob(
+                    activeChunkBuildJob,
+                    ref generatedBudget,
+                    ref attemptBudget,
+                    useTimeBudget,
+                    timeBudgetDeadline
+                );
+            }
 
             generatedInstances += activeChunkBuildJob.generatedCount - generatedBefore;
             attempts += activeChunkBuildJob.attemptCount - attemptsBefore;
@@ -951,7 +1025,8 @@ public class InstancedGrassRenderer : MonoBehaviour
                 break;
 
             // 当前 Chunk 生成完成，构建绘制批次 / GPU Buffer，并标记可渲染。
-            FinishChunkBuildJob(activeChunkBuildJob);
+            using (FinishChunkMarker.Auto())
+                FinishChunkBuildJob(activeChunkBuildJob);
             activeChunkBuildJob = null;
             completedChunks++;
             drawCallsDirty = true;
@@ -1011,12 +1086,21 @@ public class InstancedGrassRenderer : MonoBehaviour
 
             // 如果这个 Chunk 已经不在当前加载范围内，
             // 或者已经被生成出来了，就跳过这个过期任务。
-            if (!desiredChunkCoords.Contains(job.coord) || chunks.ContainsKey(job.coord))
+            if (!IsChunkBuildJobStillNeeded(job))
                 continue;
 
-            // 找到有效任务后，创建 / 获取对应 Chunk，
-            // 并初始化这个任务后续分帧生成需要的数据。
-            GrassChunk chunk = GetOrCreateChunk(job.coord);
+            GrassChunk chunk;
+
+            if (job.isLodUpgrade)
+            {
+                job.sourceChunk = chunks[job.coord];
+                chunk = GetDetachedChunk(job.coord);
+            }
+            else
+            {
+                chunk = GetOrCreateChunk(job.coord);
+            }
+
             PrepareChunkBuildJob(job, chunk);
 
             // 设为当前正在生成的任务。
@@ -1061,14 +1145,33 @@ public class InstancedGrassRenderer : MonoBehaviour
         job.maxAttempts = targetInstanceCount;
     }
 
-    private void ContinueChunkBuildJob(ChunkBuildJob job, ref int generatedBudget, ref int attemptBudget)
+    private void ContinueChunkBuildJob(
+        ChunkBuildJob job,
+        ref int generatedBudget,
+        ref int attemptBudget,
+        bool useTimeBudget,
+        float timeBudgetDeadline)
     {
+        int attemptsSinceTimeCheck = 0;
+
         while (job.attemptCount < job.maxAttempts &&
                generatedBudget > 0 &&
                attemptBudget > 0)
         {
+            if (useTimeBudget && attemptsSinceTimeCheck >= 32)
+            {
+                attemptsSinceTimeCheck = 0;
+
+                if (Time.realtimeSinceStartup >= timeBudgetDeadline)
+                {
+                    lastChunkBuildHitTimeBudget = true;
+                    break;
+                }
+            }
+
             job.attemptCount++;
             attemptBudget--;
+            attemptsSinceTimeCheck++;
 
             Vector3 rayOrigin = new Vector3(
                 job.minX + RandomRange(job.random, 0f, job.safeChunkSize),
@@ -1118,7 +1221,53 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
 
         job.chunk.IsReadyForRendering = true;
+
+        if (job.isLodUpgrade)
+        {
+            if (!chunks.TryGetValue(job.coord, out GrassChunk currentChunk) ||
+                currentChunk != job.sourceChunk)
+            {
+                ReleaseDetachedChunkBuild(job);
+                return;
+            }
+
+            generatedCount -= currentChunk.InstanceCount;
+            chunks[job.coord] = job.chunk;
+
+            currentChunk.Clear(chunkSize);
+            chunkPool.Push(currentChunk);
+        }
+
         MarkGlobalGrassBufferDirty();
+    }
+
+    private GrassChunk GetDetachedChunk(Vector2Int coord)
+    {
+        if (chunkPool.Count > 0)
+        {
+            GrassChunk pooledChunk = chunkPool.Pop();
+            pooledChunk.ResetCoord(coord, chunkSize);
+            return pooledChunk;
+        }
+
+        return new GrassChunk(coord, chunkSize);
+    }
+
+    private void ReleaseDetachedChunkBuild(ChunkBuildJob job)
+    {
+        if (job == null || !job.isLodUpgrade || job.chunk == null)
+            return;
+
+        generatedCount = Mathf.Max(0, generatedCount - job.generatedCount);
+        job.chunk.Clear(chunkSize);
+        chunkPool.Push(job.chunk);
+        job.chunk = null;
+    }
+
+    private void CancelActiveChunkBuildJob()
+    {
+        ReleaseDetachedChunkBuild(activeChunkBuildJob);
+        activeChunkBuildJob = null;
     }
 
     private int GenerateChunk(Vector2Int coord)
@@ -1364,6 +1513,8 @@ public class InstancedGrassRenderer : MonoBehaviour
         Vector3 origin = groundPoint + Vector3.up * Mathf.Max(0.001f, waterCheckHeight);
         float distance = Mathf.Max(0.001f, waterCheckHeight + waterSurfacePadding + 0.5f);
 
+        lastChunkBuildWaterRaycasts++;
+
         if (!Physics.Raycast(
                 origin,
                 Vector3.down,
@@ -1404,6 +1555,8 @@ public class InstancedGrassRenderer : MonoBehaviour
                 ? QueryTriggerInteraction.Collide
                 : QueryTriggerInteraction.Ignore;
 
+        lastChunkBuildPlacementRaycasts++;
+
         if (!Physics.Raycast(
                 rayOrigin,
                 Vector3.down,
@@ -1421,6 +1574,8 @@ public class InstancedGrassRenderer : MonoBehaviour
 
         if (!canCreateGrass)
             return false;
+
+        lastChunkBuildAcceptedPlacements++;
 
         // 每棵草随机绕 Y 轴旋转，避免所有草朝向一致。
         float yaw = RandomRange(random, 0f, 360f);
@@ -1773,10 +1928,10 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private void ClearChunkBuildQueue()
     {
+        CancelActiveChunkBuildJob();
         chunkBuildQueue.Clear();
         queuedChunkCoords.Clear();
         desiredChunkCoords.Clear();
-        activeChunkBuildJob = null;
     }
 
     private void MarkGlobalGrassBufferDirty()
@@ -2001,6 +2156,10 @@ public class InstancedGrassRenderer : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 根据草地加载范围和 Chunk 大小，估算对象池需要提前创建的 Chunk 数量
+    /// </summary>
+    /// <returns></returns>
     private int EstimatePrewarmChunkPoolCount()
     {
         if (!enableInfiniteLoading)
@@ -2101,6 +2260,8 @@ public class InstancedGrassRenderer : MonoBehaviour
         GUILayout.Label($"Last New Grass: {lastInfiniteCreatedInstances}  Cost: {lastInfiniteUpdateMs:F2} ms");
         GUILayout.Label($"Build Queue: {PendingChunkBuildCount} pending / +{lastQueuedChunks} queued");
         GUILayout.Label($"Build Frame: {lastChunkBuildGeneratedInstances} grass / {lastChunkBuildAttempts} attempts / {lastChunkBuildCompletedChunks} chunks / {lastChunkBuildMs:F2} ms");
+        GUILayout.Label($"Build Rays: {lastChunkBuildPlacementRaycasts} ground + {lastChunkBuildWaterRaycasts} water / {lastChunkBuildAcceptedPlacements} accepted");
+        GUILayout.Label($"Build Limit: {(lastChunkBuildHitTimeBudget ? "Time budget" : "Count/idle")} ({chunkGenerationMillisecondsPerFrameBudget:F1} ms)");
         GUILayout.Space(4f);
 
         GUILayout.Label($"Global Buffer: {globalGrassInstances.Count} / {globalGrassBufferCapacity}");
@@ -2116,6 +2277,7 @@ public class InstancedGrassRenderer : MonoBehaviour
 
     private void OnDestroy()
     {
+        CancelActiveChunkBuildJob();
         ReleaseAllIndirectBuffers();
 
         foreach (GrassChunk chunk in chunkPool)
@@ -2271,7 +2433,9 @@ public class InstancedGrassRenderer : MonoBehaviour
     {
         public readonly Vector2Int coord;
         public readonly DensityLodLevel lodLevel;
+        public readonly bool isLodUpgrade;
         public GrassChunk chunk;
+        public GrassChunk sourceChunk;
         public System.Random random;
         public Quaternion baseRotation;
         public Vector3 rootLocalOffset;
@@ -2288,10 +2452,14 @@ public class InstancedGrassRenderer : MonoBehaviour
             generatedCount >= targetInstanceCount ||
             attemptCount >= maxAttempts;
 
-        public ChunkBuildJob(Vector2Int coord, DensityLodLevel lodLevel)
+        public ChunkBuildJob(
+            Vector2Int coord,
+            DensityLodLevel lodLevel,
+            bool isLodUpgrade)
         {
             this.coord = coord;
             this.lodLevel = lodLevel;
+            this.isLodUpgrade = isLodUpgrade;
         }
     }
 

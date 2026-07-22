@@ -442,10 +442,7 @@ public class GrassInteractionBrushSpawner : MonoBehaviour
 
     
 
-    private bool SpawnGrassBrush(
-    bool isLeftFoot,
-    Transform footTransform,
-    Transform toeTransform)
+    private bool SpawnGrassBrush(bool isLeftFoot,Transform footTransform,Transform toeTransform)
     {
         // 没有刷子预制体就无法生成压草 Brush
         GameObject sourceBrushPrefab = GetDefaultBrushPrefab();

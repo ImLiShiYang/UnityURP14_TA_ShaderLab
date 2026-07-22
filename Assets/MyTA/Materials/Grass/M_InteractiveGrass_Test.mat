@@ -89,7 +89,7 @@ Material:
     - _AlphaClip: 0
     - _AlphaToMask: 0
     - _ArcLift: 0.12
-    - _BendStrength: 1
+    - _BendStrength: 0.55
     - _BillboardHeightScale: 1
     - _BillboardWidthScale: 1
     - _Blend: 0
@@ -112,14 +112,14 @@ Material:
     - _EnablePressCenter1: 0
     - _EnableRadialPress: 1
     - _EnvironmentReflections: 1
-    - _FlattenStrength: 0.4
+    - _FlattenStrength: 0.221
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _GradientSampleDistance: 2
     - _GrassHeightMaxOS: 0.322
     - _GrassHeightMinOS: -0.322
-    - _HeightMaskPower: 1.5
+    - _HeightMaskPower: 0.82
     - _IndirectStrength: 0.85
     - _Metallic: 0
     - _OcclusionStrength: 1
@@ -145,25 +145,25 @@ Material:
     - _SrcBlendAlpha: 1
     - _Surface: 0
     - _UseRadialBendDir: 1
-    - _WindFrequency: 1
-    - _WindSpeed: 2
-    - _WindStrength: 0.08
+    - _WindFrequency: 0.87
+    - _WindSpeed: 1.38
+    - _WindStrength: 0.1
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 0.18, g: 0.55, b: 0.08, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _GrassBendDirWS: {r: -0.35347575, g: 0, b: 0.9354437, a: 0}
+    - _GrassBendDirWS: {r: -0.72897005, g: 0, b: 0.6845456, a: 0}
     - _GrassHeightAxisOS: {r: 0, g: 0, b: 1, a: 0}
-    - _GrassInteractionRect: {r: 186.64626, g: 106.3025, b: 202.64626, a: 122.3025}
+    - _GrassInteractionRect: {r: 212.49374, g: 112.3025, b: 228.49374, a: 128.30249}
     - _GroundColor: {r: 0.05, g: 0.12, b: 0.03, a: 1}
-    - _PressCenter0WS: {r: 194.33133, g: 6.0711117, b: 114.301056, a: 0}
-    - _PressCenter1WS: {r: 194.84717, g: 6.0596404, b: 114.36011, a: 0}
+    - _PressCenter0WS: {r: 220.23212, g: 6.1352057, b: 120.171005, a: 0}
+    - _PressCenter1WS: {r: 220.66754, g: 6.1130805, b: 120.45282, a: 0}
     - _PressCenterWS: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _TipColor: {r: 0.45, g: 1, b: 0.08, a: 1}
-    - _WindDirectionWS: {r: 0, g: 0, b: 1, a: 0}
+    - _WindDirectionWS: {r: 0.71, g: 0, b: 0.48, a: 0}
   m_BuildTextureStacks: []
 --- !u!114 &4393950924113072679
 MonoBehaviour:

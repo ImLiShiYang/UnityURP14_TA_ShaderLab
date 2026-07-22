@@ -573,11 +573,8 @@ public class WaterRippleWeaponEventTrail : MonoBehaviour
                 depth01
             );
 
-            // 根据当前窗口选择攻击 / 非攻击 prefab。
-            // idleBrushPrefab 没填时，回退到 weaponBrushPrefab，避免无法生成。
-            GameObject brushPrefab = useAttackBrush ? weaponBrushPrefab : idleBrushPrefab;
-            if (brushPrefab == null)
-                brushPrefab = weaponBrushPrefab;
+            // Always use the slash-shaped weapon brush, including while walking.
+            GameObject brushPrefab = weaponBrushPrefab;
 
             // 根据当前窗口选择基础尺寸和生命周期。
             Vector2 baseBrushSize = useAttackBrush || !useIdleBrushSettings ? brushSize : idleBrushSize;

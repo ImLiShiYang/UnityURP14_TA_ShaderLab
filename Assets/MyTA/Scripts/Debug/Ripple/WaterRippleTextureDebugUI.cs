@@ -17,6 +17,12 @@ using UnityEngine.EventSystems;
 /// </summary>
 public class WaterRippleTextureDebugUI : MonoBehaviour
 {
+    public enum TextureSource
+    {
+        GrassInteraction,
+        WaterRipple
+    }
+
     public enum DebugMode
     {
         RGB = 0,
@@ -49,6 +55,12 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
     [Header("Water Ripple Texture")]
     public Texture texture;
 
+    [Header("Texture Source")]
+    [Tooltip("当前显示的调试纹理来源。")]
+    public TextureSource activeSource = TextureSource.GrassInteraction;
+    public DebugMode grassInteractionMode = DebugMode.RGB;
+    public DebugMode waterRippleMode = DebugMode.WaterHeightMagnitudeA;
+
     [Header("UI")]
     public Corner corner = Corner.TopRight;
     public Vector2 margin = new Vector2(16, 16);
@@ -69,6 +81,8 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
 
     [Header("Shortcut")]
     public KeyCode toggleKey = KeyCode.F3;
+    [Tooltip("在草地交互 RT 和水面波纹 RT 之间切换。")]
+    public KeyCode sourceToggleKey = KeyCode.F4;
     public KeyCode biggerKey = KeyCode.Equals;
     public KeyCode smallerKey = KeyCode.Minus;
 
@@ -83,6 +97,10 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
     private Text modeText;
     private Text scaleText;
     private Material runtimeMaterial;
+    private Texture grassInteractionTexture;
+    private Texture waterRippleTexture;
+    private string grassInteractionTitle = "Grass Interaction";
+    private string waterRippleTitle = "Water Ripple";
 
     private static readonly int ModeID = Shader.PropertyToID("_Mode");
     private static readonly int ExposureID = Shader.PropertyToID("_Exposure");
@@ -101,6 +119,9 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
         if (Input.GetKeyDown(toggleKey))
             SetVisible(!visible);
 
+        if (Input.GetKeyDown(sourceToggleKey))
+            ToggleTextureSource();
+
         if (Input.GetKeyDown(biggerKey))
             ChangeScale(scaleStep);
 
@@ -116,6 +137,50 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
         ApplyAll();
     }
 
+    public void SetSourceTexture(TextureSource source, Texture newTexture, string title)
+    {
+        if (source == TextureSource.GrassInteraction)
+        {
+            grassInteractionTexture = newTexture;
+            grassInteractionTitle = title;
+        }
+        else
+        {
+            waterRippleTexture = newTexture;
+            waterRippleTitle = title;
+        }
+
+        if (activeSource == source)
+            ApplyActiveSource();
+    }
+
+    public void ToggleTextureSource()
+    {
+        activeSource = activeSource == TextureSource.GrassInteraction
+            ? TextureSource.WaterRipple
+            : TextureSource.GrassInteraction;
+
+        ApplyActiveSource();
+    }
+
+    private void ApplyActiveSource()
+    {
+        if (activeSource == TextureSource.GrassInteraction)
+        {
+            texture = grassInteractionTexture;
+            mode = grassInteractionMode;
+            SetTitle(grassInteractionTitle + "  [" + sourceToggleKey + ": Water]");
+        }
+        else
+        {
+            texture = waterRippleTexture;
+            mode = waterRippleMode;
+            SetTitle(waterRippleTitle + "  [" + sourceToggleKey + ": Grass]");
+        }
+
+        ApplyAll();
+    }
+
     public void SetTitle(string title)
     {
         if (titleText != null)
@@ -125,7 +190,16 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
     public void SetMode(DebugMode newMode)
     {
         mode = newMode;
+        RememberModeForActiveSource();
         ApplyAll();
+    }
+
+    private void RememberModeForActiveSource()
+    {
+        if (activeSource == TextureSource.GrassInteraction)
+            grassInteractionMode = mode;
+        else
+            waterRippleMode = mode;
     }
 
     public void SetVisible(bool value)
@@ -149,16 +223,14 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
     {
         int count = System.Enum.GetValues(typeof(DebugMode)).Length;
         int next = ((int)mode + 1) % count;
-        mode = (DebugMode)next;
-        ApplyAll();
+        SetMode((DebugMode)next);
     }
 
     public void PreviousMode()
     {
         int count = System.Enum.GetValues(typeof(DebugMode)).Length;
         int prev = ((int)mode - 1 + count) % count;
-        mode = (DebugMode)prev;
-        ApplyAll();
+        SetMode((DebugMode)prev);
     }
 
     private void BuildUI()
