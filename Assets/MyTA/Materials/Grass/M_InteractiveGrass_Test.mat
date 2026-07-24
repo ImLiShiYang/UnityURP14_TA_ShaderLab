@@ -120,13 +120,14 @@ Material:
     - _GrassHeightMaxOS: 0.322
     - _GrassHeightMinOS: -0.322
     - _HeightMaskPower: 0.82
+    - _HistoryBendResponse: 0.5
     - _IndirectStrength: 0.85
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _PressRadius: 1.5
-    - _PressRadius0: 0.45
-    - _PressRadius1: 0.45
+    - _PressRadius0: 0.6
+    - _PressRadius1: 0.6
     - _QueueOffset: 0
     - _RadialMaskPower: 1.2
     - _RandomHeightMax: 1
@@ -145,21 +146,21 @@ Material:
     - _SrcBlendAlpha: 1
     - _Surface: 0
     - _UseRadialBendDir: 1
-    - _WindFrequency: 0.87
-    - _WindSpeed: 1.38
-    - _WindStrength: 0.1
+    - _WindFrequency: 0.27
+    - _WindSpeed: 1.33
+    - _WindStrength: 0.075
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 0.18, g: 0.55, b: 0.08, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _GrassBendDirWS: {r: -0.72897005, g: 0, b: 0.6845456, a: 0}
+    - _GrassBendDirWS: {r: 0.96443963, g: 0, b: 0.26430327, a: 0}
     - _GrassHeightAxisOS: {r: 0, g: 0, b: 1, a: 0}
-    - _GrassInteractionRect: {r: 212.49374, g: 112.3025, b: 228.49374, a: 128.30249}
+    - _GrassInteractionRect: {r: 198.2125, g: 109.02125, b: 230.2125, a: 141.02124}
     - _GroundColor: {r: 0.05, g: 0.12, b: 0.03, a: 1}
-    - _PressCenter0WS: {r: 220.23212, g: 6.1352057, b: 120.171005, a: 0}
-    - _PressCenter1WS: {r: 220.66754, g: 6.1130805, b: 120.45282, a: 0}
+    - _PressCenter0WS: {r: 214.19556, g: 6.0794725, b: 125.18741, a: 0}
+    - _PressCenter1WS: {r: 214.22208, g: 6.0794725, b: 124.66998, a: 0}
     - _PressCenterWS: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _TipColor: {r: 0.45, g: 1, b: 0.08, a: 1}

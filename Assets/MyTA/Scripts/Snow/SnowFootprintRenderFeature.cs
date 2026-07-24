@@ -189,7 +189,13 @@ public class SnowFootprintRenderFeature : ScriptableRendererFeature
                 cmd.Clear();
 
                 manager.SwapAccumAfterRenderFeature();
-                manager.ConsumeStamp();
+
+                // Keep the raw accumulated history untouched. Geometry displacement
+                // and reconstructed normals use this separate two-pass smooth result.
+                manager.BlurAccumulatedHeight(cmd);
+                context.ExecuteCommandBuffer(cmd);
+                cmd.Clear();
+                manager.RefreshReceiverMaterial();
             }
 
             CommandBufferPool.Release(cmd);

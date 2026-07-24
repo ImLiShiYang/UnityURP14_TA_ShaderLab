@@ -80,6 +80,10 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _SmoothFootstepTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _SpecGlossMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -125,17 +129,20 @@ Material:
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _RimHeight: 0.08
+    - _RimHeight: 0.15
     - _ShadowStrength: 0.9
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
-    - _SnowAOStrength: 0.25
+    - _SnowAOStrength: 0.139
     - _SnowDeformStrength: 1
+    - _SnowHeightBlurRadius: 3
+    - _SnowHeightBlurStrength: 0.7
     - _SnowMaskSmoothMax: 0.5
     - _SnowMaskSmoothMin: 0.02
+    - _SnowNormalSampleRadius: 8
     - _SnowNormalSmoothMax: 0.5
     - _SnowNormalSmoothMin: 0.01
-    - _SnowNormalStrength: 0.67
+    - _SnowNormalStrength: 1
     - _SnowRimLightStrength: 0.12
     - _SpecPower: 64
     - _SpecStrength: 0.25
@@ -143,12 +150,14 @@ Material:
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
+    - _TessellationBorderFade: 2
+    - _TessellationFactor: 7
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _FootstepRect: {r: -4.703125, g: -6.203125, b: 11.296875, a: 9.796875}
+    - _FootstepRect: {r: -16.414062, g: -13.8125, b: 15.5859375, a: 18.1875}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []

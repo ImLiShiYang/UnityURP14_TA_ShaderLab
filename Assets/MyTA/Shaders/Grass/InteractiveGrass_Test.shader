@@ -80,6 +80,10 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
         // 历史 RT 压弯强度。
         _BendStrength ("历史 RT 弯曲强度", Range(0, 3)) = 1.0
 
+        // 历史 RT 的可见响应曲线。
+        // 小于 1 会保留衰减后期的形变，避免 RT 仍有轨迹时草已经看起来完全回弹。
+        _HistoryBendResponse ("历史 RT 回弹响应", Range(0.1, 1)) = 0.5
+
         // 草被压住后整体向下压平的强度。
         _FlattenStrength ("压低强度", Range(0, 1)) = 0.25
 
@@ -190,6 +194,7 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
                 float _SpreadHeightPower;
 
                 float _BendStrength;
+                float _HistoryBendResponse;
                 float _FlattenStrength;
                 float _HeightMaskPower;
                 float4 _GrassHeightAxisOS;
@@ -450,6 +455,21 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
                 return SampleGrassInteractionUV(GetGrassInteractionUV(positionWS));
             }
 
+            float2 SampleStoredGrassBendDirection(float3 positionWS, float2 fallbackDir)
+            {
+                float2 uv = GetGrassInteractionUV(positionWS);
+                float inside = IsInside01(uv);
+                float2 encodedDir = SAMPLE_TEXTURE2D_LOD(
+                    _GrassInteractionTex,
+                    sampler_GrassInteractionTex,
+                    uv,
+                    0
+                ).gb;
+
+                float2 storedDir = encodedDir * 2.0 - 1.0;
+                return SafeNormalize2(storedDir, fallbackDir) * inside;
+            }
+
             // 根据 RT 中的 mask 梯度估算“向外散开”的方向。
             // 做法是采样左右上下四个点，比较两侧强度差，得到一个从高压区域向外的方向。
             float2 GetAccumulatedBendDir(float3 positionWS, float2 fallbackDir)
@@ -639,12 +659,21 @@ Shader "MyTA/Grass/InteractiveGrass_RT"
                 float3 rootWS = GrassTransformObjectToWorld(rootOS, grassInstanceID);
 
                 // 历史压草 mask，来自交互 RT。
-                float rtBendMask = saturate(SampleGrassInteraction(rootWS) * _BendStrength);
+                // RT 本身继续按 Recovery Time 线性衰减；这里只改变“剩余 RT 强度
+                // 映射成可见形变”的曲线。response < 1 时，衰减后半程仍保留足够
+                // 的压弯量，直到 RT 真正接近 0 才完全回弹。
+                float rawRTBendMask = saturate(
+                    SampleGrassInteraction(rootWS) * _BendStrength
+                );
+                float rtBendMask = pow(
+                    rawRTBendMask,
+                    max(_HistoryBendResponse, 0.0001)
+                );
 
                 // 固定方向和 RT 梯度方向。
                 // fixedBendDir 是兜底方向，rtRadialDir 是根据历史 RT 估算出来的向外方向。
                 float2 fixedBendDir = SafeNormalize2(_GrassBendDirWS.xz, float2(0, 1));
-                float2 rtRadialDir = GetAccumulatedBendDir(rootWS, fixedBendDir);
+                float2 rtRadialDir = SampleStoredGrassBendDirection(rootWS, fixedBendDir);
 
                 // 分别计算左右脚对当前草根的影响强度。
                 float footMask0 = GetFootPressMask(rootWS,_PressCenter0WS.xyz, _PressRadius0, _EnablePressCenter0);

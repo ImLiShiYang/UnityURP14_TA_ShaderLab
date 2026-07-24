@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// 雪地压痕 RT 管理器。
@@ -34,6 +35,32 @@ public class SnowFootprintRTManager : MonoBehaviour
     [Tooltip("CurrentBrushRT + AccumA -> AccumB 的累积材质。")]
     public Material accumulateMaterial;
 
+    [Header("Height Smoothing")]
+    [Tooltip("可选。为空时运行时自动创建 Hidden/Snow/SnowHeightBlur 材质。")]
+    public Material heightBlurMaterial;
+
+    [Tooltip("独立平滑 RT 的采样半径（像素）。不会写回历史 RT。")]
+    [Range(0f, 8f)] public float heightBlurRadius = 3f;
+
+    [Tooltip("独立平滑 RT 的混合强度。")]
+    [Range(0f, 1f)] public float heightBlurStrength = 0.8f;
+
+    [Header("Automatic Snow Rim")]
+    [Tooltip("根据下陷区域的邻域自动生成被挤到两侧的雪脊。")]
+    public bool generateAutoRim = true;
+
+    [Tooltip("下陷雪量转移到外侧雪堆的比例。0 可完全关闭；建议从 0.2 到 0.4 开始。")]
+    [Range(0f, 1f)] public float autoRimTransferRatio = 0.35f;
+
+    [Tooltip("雪脊从下陷边界向外扩展的世界空间宽度（米）。")]
+    [Range(0.02f, 1.5f)] public float autoRimWidth = 0.35f;
+
+    [Tooltip("让雪脊左右强弱略有不同，避免完全对称。")]
+    [Range(0f, 1f)] public float autoRimAsymmetry = 0.35f;
+
+    [Tooltip("雪脊不对称噪声的世界空间频率。")]
+    [Min(0.01f)] public float autoRimNoiseScale = 0.8f;
+
     [Header("RT Settings")]
     public int textureSize = 1024;
 
@@ -53,6 +80,11 @@ public class SnowFootprintRTManager : MonoBehaviour
     private RenderTexture currentBrushRT;
     private RenderTexture accumA;
     private RenderTexture accumB;
+    private RenderTexture smoothTempRT;
+    private RenderTexture smoothHeightRT;
+    private RenderTexture rimBlurTempRT;
+    private RenderTexture finalSmoothRT;
+    private bool ownsHeightBlurMaterial;
 
     private Vector3 lastCenter;
     private bool initialized;
@@ -65,6 +97,7 @@ public class SnowFootprintRTManager : MonoBehaviour
     public RenderTexture CurrentBrushRT => currentBrushRT;
     public RenderTexture AccumA => accumA;
     public RenderTexture AccumB => accumB;
+    public RenderTexture SmoothHeightRT => finalSmoothRT != null ? finalSmoothRT : smoothHeightRT;
     public Material AccumulateMaterial => accumulateMaterial;
     public Camera FootstepCamera => footstepCamera;
 
@@ -81,6 +114,16 @@ public class SnowFootprintRTManager : MonoBehaviour
     private static readonly int FootstepTexID = Shader.PropertyToID("_FootstepTex");
     private static readonly int FootstepRectID = Shader.PropertyToID("_FootstepRect");
     private static readonly int EnableFootstepID = Shader.PropertyToID("_EnableFootstep");
+    private static readonly int SmoothFootstepTexID = Shader.PropertyToID("_SmoothFootstepTex");
+    private static readonly int BlurRadiusID = Shader.PropertyToID("_BlurRadius");
+    private static readonly int BlurStrengthID = Shader.PropertyToID("_BlurStrength");
+    private static readonly int AutoRimStrengthID = Shader.PropertyToID("_AutoRimStrength");
+    private static readonly int AutoRimRadiusID = Shader.PropertyToID("_AutoRimRadius");
+    private static readonly int AutoRimAsymmetryID = Shader.PropertyToID("_AutoRimAsymmetry");
+    private static readonly int AutoRimNoiseScaleID = Shader.PropertyToID("_AutoRimNoiseScale");
+    private static readonly int FootstepWorldRectID = Shader.PropertyToID("_FootstepWorldRect");
+    private static readonly int RawDepressionTexID = Shader.PropertyToID("_RawDepressionTex");
+    private static readonly int BaseSmoothedTexID = Shader.PropertyToID("_BaseSmoothedTex");
 
     private void OnEnable()
     {
@@ -127,10 +170,19 @@ public class SnowFootprintRTManager : MonoBehaviour
         currentBrushRT = CreateRT("Snow_CurrentBrush_RT");
         accumA = CreateRT("Snow_Accum_A");
         accumB = CreateRT("Snow_Accum_B");
+        smoothTempRT = CreateRT("Snow_Smooth_Temp_RT");
+        smoothHeightRT = CreateRT("Snow_Smooth_Height_RT");
+        rimBlurTempRT = CreateRT("Snow_Rim_Blur_Temp_RT", RenderTextureFormat.RHalf);
+        finalSmoothRT = smoothHeightRT;
 
         ClearRT(currentBrushRT, SnowClearColor);
         ClearRT(accumA, SnowClearColor);
         ClearRT(accumB, SnowClearColor);
+        ClearRT(smoothTempRT, SnowClearColor);
+        ClearRT(smoothHeightRT, SnowClearColor);
+        ClearRT(rimBlurTempRT, SnowClearColor);
+
+        EnsureHeightBlurMaterial();
 
         stampVersion = 0;
         consumedStampVersion = 0;
@@ -152,13 +204,15 @@ public class SnowFootprintRTManager : MonoBehaviour
         initialized = true;
     }
 
-    private RenderTexture CreateRT(string rtName)
+    private RenderTexture CreateRT(
+        string rtName,
+        RenderTextureFormat format = RenderTextureFormat.ARGBHalf)
     {
         RenderTextureDescriptor desc = new RenderTextureDescriptor(textureSize, textureSize)
         {
             depthBufferBits = 0,
             msaaSamples = 1,
-            colorFormat = RenderTextureFormat.ARGBHalf,
+            colorFormat = format,
             sRGB = false,
             useMipMap = false,
             autoGenerateMips = false
@@ -208,6 +262,9 @@ public class SnowFootprintRTManager : MonoBehaviour
 
         receiverMaterial.SetVector(FootstepRectID, rect);
         receiverMaterial.SetTexture(FootstepTexID, accumA);
+        receiverMaterial.SetTexture(
+            SmoothFootstepTexID,
+            finalSmoothRT != null ? finalSmoothRT : (smoothHeightRT != null ? smoothHeightRT : accumA));
         receiverMaterial.SetFloat(EnableFootstepID, 1f);
     }
 
@@ -312,6 +369,82 @@ public class SnowFootprintRTManager : MonoBehaviour
         UpdateReceiverMaterial();
     }
 
+    public void BlurAccumulatedHeight(CommandBuffer cmd)
+    {
+        if (cmd == null || accumA == null || smoothHeightRT == null)
+            return;
+
+        EnsureHeightBlurMaterial();
+
+        if (heightBlurMaterial == null || smoothTempRT == null)
+        {
+            cmd.Blit(accumA, smoothHeightRT);
+            finalSmoothRT = smoothHeightRT;
+            return;
+        }
+
+        heightBlurMaterial.SetFloat(BlurRadiusID, heightBlurRadius);
+        heightBlurMaterial.SetFloat(BlurStrengthID, heightBlurStrength);
+        heightBlurMaterial.SetFloat(
+            AutoRimStrengthID,
+            generateAutoRim ? autoRimTransferRatio : 0f);
+        float worldDiameter = Mathf.Max(radius * 2f, 0.001f);
+        float rimRadiusPixels = autoRimWidth * Mathf.Max(textureSize, 1) / worldDiameter;
+        heightBlurMaterial.SetFloat(AutoRimRadiusID, Mathf.Clamp(rimRadiusPixels, 1f, 256f));
+        heightBlurMaterial.SetFloat(AutoRimAsymmetryID, autoRimAsymmetry);
+        heightBlurMaterial.SetFloat(AutoRimNoiseScaleID, autoRimNoiseScale);
+        heightBlurMaterial.SetVector(
+            FootstepWorldRectID,
+            new Vector4(
+                lastCenter.x - radius,
+                lastCenter.z - radius,
+                lastCenter.x + radius,
+                lastCenter.z + radius));
+
+        // Base displacement smoothing. This remains independent from the
+        // accumulated history so repeated updates do not keep widening tracks.
+        cmd.Blit(accumA, smoothTempRT, heightBlurMaterial, 0);
+        cmd.Blit(smoothTempRT, smoothHeightRT, heightBlurMaterial, 1);
+
+        if (!generateAutoRim ||
+            autoRimTransferRatio <= 0.001f ||
+            rimBlurTempRT == null)
+        {
+            finalSmoothRT = smoothHeightRT;
+            return;
+        }
+
+        // Positive Gaussian residual:
+        // mound = max(GaussianBlur(depression) - depression, 0).
+        // A single-channel RHalf target keeps the extra 4096 RT affordable.
+        cmd.Blit(accumA, rimBlurTempRT, heightBlurMaterial, 2);
+        heightBlurMaterial.SetTexture(RawDepressionTexID, accumA);
+        heightBlurMaterial.SetTexture(BaseSmoothedTexID, smoothHeightRT);
+        cmd.Blit(rimBlurTempRT, smoothTempRT, heightBlurMaterial, 3);
+        finalSmoothRT = smoothTempRT;
+    }
+
+    public void RefreshReceiverMaterial()
+    {
+        UpdateReceiverMaterial();
+    }
+
+    private void EnsureHeightBlurMaterial()
+    {
+        if (heightBlurMaterial != null)
+            return;
+
+        Shader blurShader = Shader.Find("Hidden/Snow/SnowHeightBlur");
+        if (blurShader == null)
+            return;
+
+        heightBlurMaterial = new Material(blurShader)
+        {
+            name = "Runtime Snow Height Blur"
+        };
+        ownsHeightBlurMaterial = true;
+    }
+
     public void ClearAllFootprints()
     {
         if (!initialized)
@@ -320,6 +453,10 @@ public class SnowFootprintRTManager : MonoBehaviour
         ClearRT(currentBrushRT, SnowClearColor);
         ClearRT(accumA, SnowClearColor);
         ClearRT(accumB, SnowClearColor);
+        ClearRT(smoothTempRT, SnowClearColor);
+        ClearRT(smoothHeightRT, SnowClearColor);
+        ClearRT(rimBlurTempRT, SnowClearColor);
+        finalSmoothRT = smoothHeightRT;
 
         if (target != null)
             lastCenter = target.position;
@@ -352,10 +489,28 @@ public class SnowFootprintRTManager : MonoBehaviour
         ReleaseRT(currentBrushRT);
         ReleaseRT(accumA);
         ReleaseRT(accumB);
+        ReleaseRT(smoothTempRT);
+        ReleaseRT(smoothHeightRT);
+        ReleaseRT(rimBlurTempRT);
 
         currentBrushRT = null;
         accumA = null;
         accumB = null;
+        smoothTempRT = null;
+        smoothHeightRT = null;
+        rimBlurTempRT = null;
+        finalSmoothRT = null;
+
+        if (ownsHeightBlurMaterial && heightBlurMaterial != null)
+        {
+            if (Application.isPlaying)
+                Destroy(heightBlurMaterial);
+            else
+                DestroyImmediate(heightBlurMaterial);
+
+            heightBlurMaterial = null;
+            ownsHeightBlurMaterial = false;
+        }
 
         initialized = false;
     }

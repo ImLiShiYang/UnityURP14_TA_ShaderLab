@@ -108,7 +108,8 @@ Material:
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _RimStrength: 0.246
+    - _RibbonMode: 0
+    - _RimStrength: 0
     - _SinkStrength: 1
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0

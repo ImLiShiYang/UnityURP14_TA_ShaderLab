@@ -13,6 +13,12 @@ Shader "Snow/SnowTrailBrush"
 
         [Header(Length)]
         _LengthSoftness ("Length Softness", Range(0.01, 1)) = 0.25
+        [HideInInspector] _RibbonMode ("Continuous Ribbon Mode", Float) = 0
+
+        [Header(Natural Edge)]
+        _EdgeNoiseStrength ("Edge Noise Strength", Range(0, 0.3)) = 0.08
+        _EdgeNoiseScale ("Edge Noise Scale", Range(0.01, 8)) = 1.4
+        _EdgeNoiseDetail ("Edge Noise Detail", Range(0, 1)) = 0.35
 
         [Header(Debug)]
         _DebugView ("Debug View", Float) = 0
@@ -58,6 +64,10 @@ Shader "Snow/SnowTrailBrush"
                 half _OuterSoftness;
 
                 half _LengthSoftness;
+                half _RibbonMode;
+                half _EdgeNoiseStrength;
+                float _EdgeNoiseScale;
+                half _EdgeNoiseDetail;
 
                 half _DebugView;
             CBUFFER_END
@@ -66,12 +76,15 @@ Shader "Snow/SnowTrailBrush"
             {
                 float4 positionOS : POSITION;
                 float2 uv         : TEXCOORD0;
+                float4 color      : COLOR;
             };
 
             struct Varyings
             {
                 float4 positionHCS : SV_POSITION;
                 float2 uv         : TEXCOORD0;
+                float3 positionWS : TEXCOORD1;
+                half4 color       : COLOR;
             };
 
             Varyings Vert(Attributes IN)
@@ -80,6 +93,8 @@ Shader "Snow/SnowTrailBrush"
 
                 OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);
                 OUT.uv = IN.uv;
+                OUT.positionWS = TransformObjectToWorld(IN.positionOS.xyz);
+                OUT.color = IN.color;
 
                 return OUT;
             }
@@ -88,6 +103,26 @@ Shader "Snow/SnowTrailBrush"
             {
                 maxVal = max(maxVal, minVal + 0.0001h);
                 return smoothstep(minVal, maxVal, x);
+            }
+
+            float Hash21(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
+            }
+
+            float ValueNoise(float2 p)
+            {
+                float2 cell = floor(p);
+                float2 local = frac(p);
+                float2 blend = local * local * (3.0 - 2.0 * local);
+
+                float a = Hash21(cell);
+                float b = Hash21(cell + float2(1.0, 0.0));
+                float c = Hash21(cell + float2(0.0, 1.0));
+                float d = Hash21(cell + float2(1.0, 1.0));
+                return lerp(lerp(a, b, blend.x), lerp(c, d, blend.x), blend.y);
             }
 
             half4 Frag(Varyings IN) : SV_Target
@@ -100,6 +135,17 @@ Shader "Snow/SnowTrailBrush"
 
                 half side = abs((half)p.x);
                 half forward = abs((half)p.y);
+                half ribbonAmount = saturate(_RibbonMode);
+
+                // Stable world-space noise only affects the transition near the
+                // two sides. The center remains flat and the result does not swim.
+                float2 noiseUV = IN.positionWS.xz * max(_EdgeNoiseScale, 0.01);
+                float broadNoise = ValueNoise(noiseUV);
+                float detailNoise = ValueNoise(noiseUV * 3.71 + 19.17);
+                half signedNoise = (half)((lerp(broadNoise, detailNoise, _EdgeNoiseDetail) * 2.0) - 1.0);
+                half edgeBand = SafeSmoothStep(_CenterWidth * 0.65h, _CenterWidth, side);
+                edgeBand *= 1.0h - SafeSmoothStep(_EdgeWidth, 1.0h, side);
+                side = saturate(side + signedNoise * _EdgeNoiseStrength * edgeBand * ribbonAmount);
 
                 // =====================================================
                 // Capsule Length Mask
@@ -124,7 +170,11 @@ Shader "Snow/SnowTrailBrush"
 
                 // 胶囊整体 mask。
                 // capsuleDist <= 1 内有效，外侧渐隐。
-                half lengthMask = 1.0h - SafeSmoothStep(1.0h - _LengthSoftness, 1.0h, capsuleDist);
+                half capsuleMask = 1.0h - SafeSmoothStep(1.0h - _LengthSoftness, 1.0h, capsuleDist);
+
+                // A continuous ribbon has shared geometry at every internal path point.
+                // It must not create a new longitudinal cap for each movement sample.
+                half lengthMask = lerp(capsuleMask, 1.0h, ribbonAmount);
 
                 // -----------------------------------------------------
                 // Center Sink
@@ -166,7 +216,8 @@ Shader "Snow/SnowTrailBrush"
                 // 总 mask：sink 和 rim 有一个存在就认为这个 brush 有效。
                 half mask = saturate(max(sinkShape, rimShape));
 
-                half sink = saturate(sinkShape * _SinkStrength);
+                half depthScale = lerp(1.0h, max(IN.color.r, 0.01h), ribbonAmount);
+                half sink = saturate(sinkShape * _SinkStrength * depthScale);
                 half rim = saturate(rimShape * _RimStrength);
 
                 // DebugView:

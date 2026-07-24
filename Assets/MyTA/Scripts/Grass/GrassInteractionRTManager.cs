@@ -123,6 +123,9 @@ public class GrassInteractionRTManager : MonoBehaviour
     private static readonly int LastTexID =
         Shader.PropertyToID("_LastTex");
 
+    private static readonly int LastTexTexelSizeID =
+        Shader.PropertyToID("_LastTex_TexelSize");
+
     private static readonly int OffsetID =
         Shader.PropertyToID("_Offset");
 
@@ -469,6 +472,19 @@ public class GrassInteractionRTManager : MonoBehaviour
         // 累积 Shader 会在它的基础上叠加当前 Brush、脚部实时压草和恢复衰减。
         accumulateMaterial.SetTexture(LastTexID, accumA);
 
+        // Runtime-created materials do not reliably receive the automatic
+        // _LastTex_TexelSize value on every backend. The accumulation shader
+        // needs this to sample the previous frame at the correct texel.
+        if (accumA != null)
+        {
+            float width = Mathf.Max(1, accumA.width);
+            float height = Mathf.Max(1, accumA.height);
+            accumulateMaterial.SetVector(
+                LastTexTexelSizeID,
+                new Vector4(1f / width, 1f / height, width, height)
+            );
+        }
+
         // 历史 RT 的 UV 偏移。
         // 用来抵消顶部相机跟随角色移动造成的 RT 内容偏移。
         accumulateMaterial.SetVector(OffsetID, appliedOffsetThisFrame);
@@ -484,6 +500,20 @@ public class GrassInteractionRTManager : MonoBehaviour
         // xy = minX, minZ
         // zw = maxX, maxZ
         accumulateMaterial.SetVector(InteractionRectID, rect);
+
+        // Capture the current walking direction into newly-created history.
+        // Existing history keeps the direction already encoded in its G/B channels.
+        Vector3 historyBendDir = target.forward;
+        historyBendDir.y = 0f;
+
+        if (historyBendDir.sqrMagnitude < 0.0001f)
+            historyBendDir = Vector3.forward;
+
+        historyBendDir.Normalize();
+        accumulateMaterial.SetVector(
+            GrassBendDirWSID,
+            new Vector4(historyBendDir.x, historyBendDir.y, historyBendDir.z, 0f)
+        );
 
         // 左脚压草中心，世界空间。
         accumulateMaterial.SetVector(

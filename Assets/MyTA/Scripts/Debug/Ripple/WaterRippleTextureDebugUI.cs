@@ -58,7 +58,7 @@ public class WaterRippleTextureDebugUI : MonoBehaviour
     [Header("Texture Source")]
     [Tooltip("当前显示的调试纹理来源。")]
     public TextureSource activeSource = TextureSource.GrassInteraction;
-    public DebugMode grassInteractionMode = DebugMode.RGB;
+    public DebugMode grassInteractionMode = DebugMode.R;
     public DebugMode waterRippleMode = DebugMode.WaterHeightMagnitudeA;
 
     [Header("UI")]

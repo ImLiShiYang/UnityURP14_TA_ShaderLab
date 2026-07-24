@@ -77,6 +77,7 @@ Shader "Hidden/Grass/InteractionAccumulate"
                 float _DecayAmount;
                 float _EdgeSoftness;
                 float4 _InteractionRect;
+                float4 _GrassBendDirWS;
 
                 float4 _PressCenter0WS;
                 float4 _PressCenter1WS;
@@ -124,6 +125,19 @@ Shader "Hidden/Grass/InteractionAccumulate"
                 return pixel * _LastTex_TexelSize.xy;
             }
 
+            float2 SafeNormalizeDirection(float2 value, float2 fallback)
+            {
+                float valueLengthSq = dot(value, value);
+
+                if (valueLengthSq > 0.000001)
+                    return value * rsqrt(valueLengthSq);
+
+                float fallbackLengthSq = dot(fallback, fallback);
+                return fallbackLengthSq > 0.000001
+                    ? fallback * rsqrt(fallbackLengthSq)
+                    : float2(0.0, 1.0);
+            }
+
             // 根据某只脚的世界坐标，计算当前 worldXZ 位置的实时压草强度。
             // 离脚中心越近，mask 越接近 1；超过半径后接近 0。
             float FootMask(float2 worldXZ, float3 centerWS, float radius, float enabled)
@@ -164,7 +178,12 @@ Shader "Hidden/Grass/InteractionAccumulate"
 
                 // 对齐到纹素中心后采样上一帧历史压草 RT。
                 historyUV = SnapUVToTexel(historyUV);
-                float historyMask = SAMPLE_TEXTURE2D(_LastTex, sampler_LastTex, historyUV).r;
+                float4 historySample = SAMPLE_TEXTURE2D(_LastTex, sampler_LastTex, historyUV);
+                float historyMask = historySample.r;
+                float2 historyBendDir = SafeNormalizeDirection(
+                    historySample.gb * 2.0 - 1.0,
+                    _GrassBendDirWS.xz
+                );
 
                 // 历史压痕恢复。
                 // 每帧减去 _DecayAmount，让走过的草逐渐恢复。
@@ -192,9 +211,41 @@ Shader "Hidden/Grass/InteractionAccumulate"
                 // 两只脚取较大值，避免左右脚叠加后过强。
                 float liveFootMask = max(leftFootMask, rightFootMask);
 
-                // 最终压草强度：
-                // 当前帧 Brush、历史压草、实时脚部压草三者取最大值。
-                float resultMask = max(currentMask, max(historyMask, liveFootMask));
+                float2 fallbackBendDir = SafeNormalizeDirection(
+                    _GrassBendDirWS.xz,
+                    float2(0.0, 1.0)
+                );
+
+                float2 leftFootDir = SafeNormalizeDirection(
+                    worldXZ - _PressCenter0WS.xz,
+                    fallbackBendDir
+                );
+                float2 rightFootDir = SafeNormalizeDirection(
+                    worldXZ - _PressCenter1WS.xz,
+                    fallbackBendDir
+                );
+
+                float useRightFoot = step(leftFootMask, rightFootMask);
+                float2 liveFootDir = lerp(leftFootDir, rightFootDir, useRightFoot);
+
+                // A regular brush uses the walking direction captured this frame.
+                // A live foot uses its radial direction away from the foot center.
+                float newMask = max(currentMask, liveFootMask);
+                float useLiveFootDir = step(currentMask, liveFootMask);
+                float2 newBendDir = SafeNormalizeDirection(
+                    lerp(fallbackBendDir, liveFootDir, useLiveFootDir),
+                    fallbackBendDir
+                );
+
+                // Keep the direction stored with history unless a stronger new
+                // press replaces it. This prevents old grass from rotating when
+                // the character changes walking direction.
+                float historyWins = step(newMask + 0.0001, historyMask);
+                float2 resultBendDir = SafeNormalizeDirection(
+                    lerp(newBendDir, historyBendDir, historyWins),
+                    fallbackBendDir
+                );
+                float resultMask = max(newMask, historyMask);
 
                 // RT 边缘淡出。
                 // 越靠近边缘，mask 越弱，防止交互区域移动时边缘出现硬切痕迹。
@@ -202,11 +253,15 @@ Shader "Hidden/Grass/InteractionAccumulate"
                 float edgeY = min(uv.y, 1.0 - uv.y);
                 float edge = saturate(min(edgeX, edgeY) * _EdgeSoftness);
 
-                resultMask = saturate(resultMask * edge);
+                // Edge is a spatial cap, not a per-frame multiplier.
+                // Multiplying the history every frame produces exponential,
+                // frame-rate-dependent recovery that bypasses Recovery Time.
+                resultMask = saturate(min(resultMask, edge));
 
-                // 输出灰度 mask。
-                // 草 Shader 后面主要采样 r 通道作为压草强度。
-                return half4(resultMask, resultMask, resultMask, 1.0);
+                // R stores pressure strength. G/B store the frozen world-space
+                // bend direction encoded from [-1, 1] to [0, 1].
+                float2 encodedBendDir = resultBendDir * 0.5 + 0.5;
+                return half4(resultMask, encodedBendDir.x, encodedBendDir.y, 1.0);
             }
 
             ENDHLSL

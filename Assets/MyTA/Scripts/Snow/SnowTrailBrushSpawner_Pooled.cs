@@ -53,6 +53,53 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
     [Tooltip("每帧最多补多少个 Brush。")]
     public int maxBrushesPerFrame = 3;
 
+    [Tooltip("使用相邻采样点之间的实际距离作为 Brush 长度，避免转弯时固定长 Brush 扇形重叠。")]
+    public bool useDynamicSegmentLength = true;
+
+    [Tooltip("动态 Segment 首尾的额外重叠长度（米），用于避免相邻段之间出现缝隙。")]
+    [Min(0f)] public float segmentOverlap = 0.06f;
+
+    [Tooltip("动态 Segment 的首尾柔化范围。值越小，中段越稳定，重复端帽痕迹越少。")]
+    [Range(0.01f, 0.5f)] public float segmentEndSoftness = 0.08f;
+
+    [Header("Continuous Ribbon")]
+    [Tooltip("使用共享顶点的连续带状网格写入 RT，避免每个独立 Brush 的头尾接缝。")]
+    public bool useContinuousRibbon = true;
+
+    [Tooltip("Ribbon 保留的最大路径点数。超出 RT 覆盖范围的旧点会逐步移除。")]
+    [Min(16)] public int maxRibbonPoints = 256;
+
+    [Tooltip("转角外扩限制。越小越不容易在急转弯处产生尖刺。")]
+    [Range(1f, 3f)] public float ribbonMiterLimit = 1.6f;
+
+    [Tooltip("转角达到该角度后使用 Bevel Join，避免 Miter 形成长三角。")]
+    [Range(10f, 120f)] public float ribbonBevelAngle = 45f;
+
+    [Tooltip("转角达到该角度后断开 Ribbon 并开始新段，避免掉头时左右边界翻转。")]
+    [Range(90f, 175f)] public float ribbonBreakAngle = 135f;
+
+    [Tooltip("可选的 Ribbon 材质。为空时自动使用 Trail Brush prefab 上的材质。")]
+    public Material ribbonMaterial;
+
+    [Header("Natural Trail Variation")]
+    [Tooltip("沿轨迹缓慢改变宽度。只改变 Ribbon 外形，不会产生逐帧抖动。")]
+    [Range(0f, 0.35f)] public float ribbonWidthVariation = 0.1f;
+
+    [Tooltip("沿轨迹缓慢改变下陷深度。")]
+    [Range(0f, 0.35f)] public float ribbonDepthVariation = 0.08f;
+
+    [Tooltip("宽度和深度变化的空间尺度（米）。数值越大，变化越舒缓。")]
+    [Min(0.05f)] public float ribbonVariationScale = 1.5f;
+
+    [Tooltip("只扰动轨迹边界的世界空间噪声强度。")]
+    [Range(0f, 0.3f)] public float ribbonEdgeNoiseStrength = 0.08f;
+
+    [Tooltip("边界噪声的世界空间频率。")]
+    [Min(0.01f)] public float ribbonEdgeNoiseScale = 1.4f;
+
+    [Tooltip("边界噪声中细节层的占比。")]
+    [Range(0f, 1f)] public float ribbonEdgeNoiseDetail = 0.35f;
+
     [Tooltip("Brush 存活时间。需要至少活到 SnowFootstepCamera 渲染一次。")]
     public float brushLife = 0.1f;
 
@@ -95,6 +142,7 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
     private Vector3 lastTrailPosition;
     private Vector3 lastMoveDirection;
     private bool hasLastTrailPosition;
+    private SnowTrailRibbonRenderer ribbonRenderer;
 
     private static readonly int SinkStrengthID = Shader.PropertyToID("_SinkStrength");
     private static readonly int RimStrengthID = Shader.PropertyToID("_RimStrength");
@@ -102,6 +150,9 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
     private static readonly int EdgeWidthID = Shader.PropertyToID("_EdgeWidth");
     private static readonly int OuterSoftnessID = Shader.PropertyToID("_OuterSoftness");
     private static readonly int LengthSoftnessID = Shader.PropertyToID("_LengthSoftness");
+    private static readonly int EdgeNoiseStrengthID = Shader.PropertyToID("_EdgeNoiseStrength");
+    private static readonly int EdgeNoiseScaleID = Shader.PropertyToID("_EdgeNoiseScale");
+    private static readonly int EdgeNoiseDetailID = Shader.PropertyToID("_EdgeNoiseDetail");
 
     private void Awake()
     {
@@ -119,6 +170,9 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
 
         if (brushPool == null)
             brushPool = GetComponentInParent<SnowTrailBrushPool>();
+
+        if (useContinuousRibbon)
+            EnsureRibbonRenderer();
     }
 
     private void Start()
@@ -133,6 +187,9 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
 
     private void Update()
     {
+        if (Input.GetKeyDown(KeyCode.C) && ribbonRenderer != null)
+            ribbonRenderer.BeginNewTrail();
+
         if (!CanSpawnTrail())
             return;
 
@@ -155,6 +212,9 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
             lastTrailPosition = currentPosition;
             lastMoveDirection = GetFlatForward();
 
+            if (ribbonRenderer != null)
+                ribbonRenderer.BeginNewTrail();
+
             if (logSpawn)
                 Debug.Log("[SnowTrailBrushSpawner_Pooled] Teleport distance detected. Reset trail.");
 
@@ -171,21 +231,14 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
         else
             moveDirection.Normalize();
 
-        Vector3 fromDirection = lastMoveDirection;
-
-        if (fromDirection.sqrMagnitude < 0.0001f)
-            fromDirection = moveDirection;
-
-        fromDirection.y = 0f;
         moveDirection.y = 0f;
 
-        if (fromDirection.sqrMagnitude < 0.0001f)
-            fromDirection = Vector3.forward;
+        if (moveDirection.sqrMagnitude < 0.0001f)
+            moveDirection = GetFlatForward();
 
         if (moveDirection.sqrMagnitude < 0.0001f)
-            moveDirection = fromDirection;
+            moveDirection = Vector3.forward;
 
-        fromDirection.Normalize();
         moveDirection.Normalize();
 
         if (fillBetweenSteps)
@@ -193,26 +246,20 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
             int count = Mathf.FloorToInt(distance / trailStepDistance);
             count = Mathf.Clamp(count, 1, maxBrushesPerFrame);
 
+            Vector3 segmentStart = lastTrailPosition;
+
             for (int i = 1; i <= count; i++)
             {
                 float t = i / (float)count;
-                Vector3 spawnCenter = Vector3.Lerp(lastTrailPosition, currentPosition, t);
+                Vector3 segmentEnd = Vector3.Lerp(lastTrailPosition, currentPosition, t);
 
-                // 拐弯优化：每个补点的方向从上一段方向平滑过渡到当前移动方向。
-                Vector3 stepDirection = Vector3.Slerp(fromDirection, moveDirection, t);
-
-                if (stepDirection.sqrMagnitude < 0.0001f)
-                    stepDirection = moveDirection;
-
-                stepDirection.y = 0f;
-                stepDirection.Normalize();
-
-                SpawnTrailBrush(spawnCenter, stepDirection);
+                SpawnTrailSegment(segmentStart, segmentEnd, moveDirection);
+                segmentStart = segmentEnd;
             }
         }
         else
         {
-            SpawnTrailBrush(currentPosition, moveDirection);
+            SpawnTrailSegment(lastTrailPosition, currentPosition, moveDirection);
         }
 
         lastTrailPosition = currentPosition;
@@ -229,8 +276,9 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
 
         bool hasPool = usePool && brushPool != null && brushPool.HasPrefab;
         bool hasFallbackPrefab = trailBrushPrefab != null;
+        bool hasRibbon = useContinuousRibbon && EnsureRibbonRenderer();
 
-        if (!hasPool && !hasFallbackPrefab)
+        if (!hasRibbon && !hasPool && !hasFallbackPrefab)
             return false;
 
         if (requireMoveInput && playerController != null && !playerController.HasMoveInput)
@@ -261,7 +309,142 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
         return false;
     }
 
-    private void SpawnTrailBrush(Vector3 centerPosition, Vector3 moveDirection)
+    private void SpawnTrailSegment(Vector3 startPosition, Vector3 endPosition, Vector3 fallbackDirection)
+    {
+        if (useContinuousRibbon && EnsureRibbonRenderer())
+        {
+            SpawnRibbonSegment(startPosition, endPosition, fallbackDirection);
+            return;
+        }
+
+        Vector3 flatStart = FlattenXZ(startPosition);
+        Vector3 flatEnd = FlattenXZ(endPosition);
+        Vector3 segmentDirection = flatEnd - flatStart;
+        float segmentLength = segmentDirection.magnitude;
+
+        if (segmentLength < 0.0001f)
+            return;
+
+        segmentDirection /= segmentLength;
+
+        if (segmentDirection.sqrMagnitude < 0.0001f)
+            segmentDirection = fallbackDirection;
+
+        Vector3 segmentCenter = Vector3.Lerp(startPosition, endPosition, 0.5f);
+        SpawnTrailBrush(segmentCenter, segmentDirection, segmentLength);
+    }
+
+    private void SpawnRibbonSegment(Vector3 startPosition, Vector3 endPosition, Vector3 fallbackDirection)
+    {
+        Vector3 direction = FlattenXZ(endPosition) - FlattenXZ(startPosition);
+        if (direction.sqrMagnitude < 0.0001f)
+            direction = fallbackDirection;
+        if (direction.sqrMagnitude < 0.0001f)
+            direction = GetFlatForward();
+        direction.Normalize();
+
+        ribbonRenderer.SetShape(
+            trailBrushSize.x,
+            sinkStrength,
+            rimStrength,
+            centerWidth,
+            edgeWidth,
+            outerSoftness);
+        ribbonRenderer.SetJoinSettings(
+            maxRibbonPoints,
+            ribbonMiterLimit,
+            ribbonBevelAngle,
+            ribbonBreakAngle);
+        ribbonRenderer.SetNaturalVariationSettings(
+            ribbonWidthVariation,
+            ribbonDepthVariation,
+            ribbonVariationScale,
+            ribbonEdgeNoiseStrength,
+            ribbonEdgeNoiseScale,
+            ribbonEdgeNoiseDetail);
+
+        if (ribbonRenderer.PointCount == 0 &&
+            TryGetGroundPoint(startPosition, direction, out Vector3 startPoint, out Vector3 startNormal, out _))
+        {
+            ribbonRenderer.AddPoint(startPoint, startNormal);
+        }
+
+        if (!TryGetGroundPoint(endPosition, direction, out Vector3 endPoint, out Vector3 endNormal, out _))
+            return;
+
+        ribbonRenderer.AddPoint(endPoint, endNormal);
+
+        if (SnowFootprintRTManager.Active != null)
+            SnowFootprintRTManager.Active.NotifyBrushSpawned();
+    }
+
+    private bool EnsureRibbonRenderer()
+    {
+        if (ribbonRenderer != null)
+            return true;
+
+        Material material = ribbonMaterial;
+
+        if (material == null && trailBrushPrefab != null)
+        {
+            Renderer prefabRenderer = trailBrushPrefab.GetComponentInChildren<Renderer>(true);
+            if (prefabRenderer != null)
+                material = prefabRenderer.sharedMaterial;
+        }
+
+        if (material == null && brushPool != null && brushPool.brushPrefab != null)
+        {
+            Renderer prefabRenderer = brushPool.brushPrefab.GetComponentInChildren<Renderer>(true);
+            if (prefabRenderer != null)
+                material = prefabRenderer.sharedMaterial;
+        }
+
+        if (material == null)
+            return false;
+
+        GameObject ribbonObject = new GameObject("Runtime Snow Trail Ribbon");
+        ribbonObject.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        ribbonObject.transform.localScale = Vector3.one;
+
+        ribbonRenderer = ribbonObject.AddComponent<SnowTrailRibbonRenderer>();
+        ribbonRenderer.Initialize(
+            material,
+            brushLayerName,
+            maxRibbonPoints,
+            trailBrushSize.x,
+            ribbonMiterLimit,
+            ribbonBevelAngle,
+            ribbonBreakAngle);
+        ribbonRenderer.SetShape(
+            trailBrushSize.x,
+            sinkStrength,
+            rimStrength,
+            centerWidth,
+            edgeWidth,
+            outerSoftness);
+        ribbonRenderer.SetNaturalVariationSettings(
+            ribbonWidthVariation,
+            ribbonDepthVariation,
+            ribbonVariationScale,
+            ribbonEdgeNoiseStrength,
+            ribbonEdgeNoiseScale,
+            ribbonEdgeNoiseDetail);
+
+        return true;
+    }
+
+    private void OnDestroy()
+    {
+        if (ribbonRenderer == null)
+            return;
+
+        if (Application.isPlaying)
+            Destroy(ribbonRenderer.gameObject);
+        else
+            DestroyImmediate(ribbonRenderer.gameObject);
+    }
+
+    private void SpawnTrailBrush(Vector3 centerPosition, Vector3 moveDirection, float segmentLength)
     {
         if (!TryGetGroundPoint(centerPosition, moveDirection, out Vector3 spawnPosition, out Vector3 groundNormal, out Vector3 forwardOnSurface))
             return;
@@ -269,8 +452,16 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
         Quaternion spawnRotation = Quaternion.LookRotation(-groundNormal, forwardOnSurface);
         spawnRotation = Quaternion.AngleAxis(yawOffset, groundNormal) * spawnRotation;
 
+        float brushLength = useDynamicSegmentLength
+            ? Mathf.Max(0.01f, segmentLength + segmentOverlap)
+            : trailBrushSize.y;
+
+        float effectiveLengthSoftness = useDynamicSegmentLength
+            ? segmentEndSoftness
+            : lengthSoftness;
+
         Vector3 brushScale = overrideBrushScale
-            ? new Vector3(trailBrushSize.x, trailBrushSize.y, 1f)
+            ? new Vector3(trailBrushSize.x, brushLength, 1f)
             : Vector3.one;
 
         GameObject brush = null;
@@ -287,13 +478,13 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
                 centerWidth,
                 edgeWidth,
                 outerSoftness,
-                lengthSoftness
+                effectiveLengthSoftness
             );
         }
         else
         {
             brush = Instantiate(trailBrushPrefab, spawnPosition, spawnRotation);
-            SetupFallbackBrush(brush, brushScale);
+            SetupFallbackBrush(brush, brushScale, effectiveLengthSoftness);
             Destroy(brush, brushLife);
         }
 
@@ -309,7 +500,8 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
         {
             Debug.Log(
                 $"[SnowTrailBrushSpawner_Pooled] Spawn Trail Brush. " +
-                $"position={spawnPosition}, forward={forwardOnSurface}, normal={groundNormal}, pool={(usePool && brushPool != null)}"
+                $"position={spawnPosition}, forward={forwardOnSurface}, length={brushLength:F3}, " +
+                $"normal={groundNormal}, pool={(usePool && brushPool != null)}"
             );
         }
     }
@@ -417,7 +609,7 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
         return bestDistance < float.MaxValue;
     }
 
-    private void SetupFallbackBrush(GameObject brush, Vector3 brushScale)
+    private void SetupFallbackBrush(GameObject brush, Vector3 brushScale, float effectiveLengthSoftness)
     {
         if (brush == null)
             return;
@@ -447,7 +639,10 @@ public class SnowTrailBrushSpawner_Pooled : MonoBehaviour
             mpb.SetFloat(CenterWidthID, centerWidth);
             mpb.SetFloat(EdgeWidthID, edgeWidth);
             mpb.SetFloat(OuterSoftnessID, outerSoftness);
-            mpb.SetFloat(LengthSoftnessID, lengthSoftness);
+            mpb.SetFloat(LengthSoftnessID, effectiveLengthSoftness);
+            mpb.SetFloat(EdgeNoiseStrengthID, ribbonEdgeNoiseStrength);
+            mpb.SetFloat(EdgeNoiseScaleID, ribbonEdgeNoiseScale);
+            mpb.SetFloat(EdgeNoiseDetailID, ribbonEdgeNoiseDetail);
 
             r.SetPropertyBlock(mpb);
         }

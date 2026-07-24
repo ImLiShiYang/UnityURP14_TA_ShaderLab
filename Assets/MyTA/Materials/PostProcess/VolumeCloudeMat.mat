@@ -103,7 +103,7 @@ Material:
     - _ClearCoatSmoothness: 0
     - _CloudAmbient: 0.437
     - _CloudBottomDarkness: 0.507
-    - _CloudCoverage: 0.522
+    - _CloudCoverage: 0.348
     - _CloudDensity: 2.31
     - _CloudMapScale: 0.008
     - _CloudMapStrength: 0.924
@@ -119,15 +119,15 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _EdgeFalloff: 0.664
+    - _EdgeFalloff: 0.787
     - _EnvironmentReflections: 1
-    - _ErosionNoiseScale: 4.56
-    - _ErosionStrength: 0.275
+    - _ErosionNoiseScale: 4.41
+    - _ErosionStrength: 0.246
     - _ExtinctionCoeff: 0.66
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
-    - _LightStepCount: 3
+    - _LightStepCount: 4
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
@@ -142,7 +142,7 @@ Material:
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
-    - _StepCount: 8
+    - _StepCount: 32
     - _StepJitter: 1
     - _SunIntensity: 1.22
     - _Surface: 0
